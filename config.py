@@ -1,6 +1,10 @@
+import os
+
 from decouple import Config, RepositoryEnv
 
-config = Config(RepositoryEnv(".env"))
+# Use a local .env file when present (development), otherwise read directly
+# from the process environment (Railway and other hosted platforms).
+config = Config(RepositoryEnv(".env")) if os.path.exists(".env") else Config(os.environ)
 
 # Telegram Bot API credentials. No MTProto/API_ID/API_HASH is required.
 BOT_TOKEN = config("BOT_TOKEN")
