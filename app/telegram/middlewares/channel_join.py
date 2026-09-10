@@ -24,7 +24,9 @@ class ChannelJoinMiddleware(BaseMiddleware):
             return False
 
         if ctx.is_callback:
-            data = ctx.event.data.decode("utf-8")
+            data = getattr(ctx.event, "data", b"")
+            if isinstance(data, bytes):
+                data = data.decode("utf-8")
             return data != CHECK_JOIN_CALLBACK
 
         if ctx.is_newmessage:
