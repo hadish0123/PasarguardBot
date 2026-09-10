@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 
@@ -19,7 +21,13 @@ async def test_two_users_keep_independent_registration_ids(monkeypatch):
         row.update(values)
 
     async def fake_get_me(token):
-        return {"id": {"TOKEN_A": 111, "TOKEN_B": 222}[token], "username": token.lower()}
+        # Force the two handlers to overlap so the regression test covers
+        # simultaneous submissions rather than only sequential messages.
+        if token == "TOKEN_A":
+            await asyncio.sleep(0.01)
+            return {"id": 111, "username": "token_a"}
+        await asyncio.sleep(0)
+        return {"id": 222, "username": "token_b"}
 
     monkeypatch.setattr("app.telegram.admin.central_registration.get_active_for_owner", get_active_for_owner)
     monkeypatch.setattr("app.telegram.admin.central_registration.get_by_id", get_by_id)
@@ -40,8 +48,10 @@ async def test_two_users_keep_independent_registration_ids(monkeypatch):
     # while exercising the exact user -> registration -> update path.
     from app.telegram.admin.central_registration import registration_messages
 
-    await registration_messages(Event(101, "TOKEN_A"))
-    await registration_messages(Event(202, "TOKEN_B"))
+    await asyncio.gather(
+        registration_messages(Event(101, "TOKEN_A")),
+        registration_messages(Event(202, "TOKEN_B")),
+    )
 
     assert registrations[101]["bot_id"] == 111
     assert registrations[202]["bot_id"] == 222
