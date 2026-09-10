@@ -12,8 +12,6 @@ EventKind = Literal["newmessage", "callback", "other"]
 
 @dataclass
 class MiddlewareContext:
-    """Per-update state for middleware chains."""
-
     event: events.common.EventCommon
     kind: EventKind
     user_id: int | None
@@ -36,17 +34,20 @@ class MiddlewareContext:
             event_id = getattr(event, "msg_id", None) or getattr(event, "id", None)
         elif isinstance(event, events.NewMessage.Event):
             kind = "newmessage"
-            if hasattr(event, "message") and event.message:
-                event_id = getattr(event.message, "id", None)
-            else:
-                event_id = getattr(event, "id", None)
+            event_id = getattr(getattr(event, "message", None), "id", None) or getattr(event, "id", None)
         else:
             kind = "other"
             event_id = getattr(event, "id", None)
 
+        from app.runtime.context import get_current_tenant
         from config import ADMIN_ID
 
-        is_admin = bool(user_id and user_id in ADMIN_ID)
+        tenant = get_current_tenant()
+        if tenant is not None:
+            # A representative's owner is the admin of that representative bot.
+            is_admin = bool(user_id and int(user_id) == int(tenant.owner_user_id))
+        else:
+            is_admin = bool(user_id and user_id in ADMIN_ID)
 
         return cls(
             event=event,
