@@ -1,0 +1,22 @@
+name: Multi-bot regression
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: pyproject.toml
+      - name: Install development dependencies
+        run: uv sync --frozen --only-group dev
+      - name: Compile changed runtime
+        run: uv run --no-sync python -m compileall -q app tests
+      - name: Run multi-bot isolation tests
+        run: uv run --no-sync pytest -q tests/test_multi_bot_runtime_isolation.py
