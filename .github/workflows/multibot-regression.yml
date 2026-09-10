@@ -19,4 +19,6 @@ jobs:
       - name: Compile changed runtime
         run: uv run --no-sync python -m compileall -q app tests
       - name: Run multi-bot isolation tests
+        env:
+          PYTHONPATH: .
         run: uv run --no-sync pytest -q tests/test_multi_bot_runtime_isolation.py
