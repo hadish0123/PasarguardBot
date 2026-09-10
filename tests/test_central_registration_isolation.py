@@ -16,13 +16,14 @@ async def test_two_users_keep_independent_registration_ids(monkeypatch):
     async def get_by_id(registration_id):
         return next((r for r in registrations.values() if r["id"] == registration_id), None)
 
+    async def get_by_bot_id(_bot_id):
+        return None
+
     async def update_registration(registration_id, **values):
         row = await get_by_id(registration_id)
         row.update(values)
 
     async def fake_get_me(token):
-        # Force the two handlers to overlap so the regression test covers
-        # simultaneous submissions rather than only sequential messages.
         if token == "TOKEN_A":
             await asyncio.sleep(0.01)
             return {"id": 111, "username": "token_a"}
@@ -31,6 +32,7 @@ async def test_two_users_keep_independent_registration_ids(monkeypatch):
 
     monkeypatch.setattr("app.telegram.admin.central_registration.get_active_for_owner", get_active_for_owner)
     monkeypatch.setattr("app.telegram.admin.central_registration.get_by_id", get_by_id)
+    monkeypatch.setattr("app.telegram.admin.central_registration.get_by_bot_id", get_by_bot_id)
     monkeypatch.setattr("app.telegram.admin.central_registration.update_registration", update_registration)
     monkeypatch.setattr("app.telegram.admin.central_registration._get_me", fake_get_me)
     monkeypatch.setattr("app.telegram.admin.central_registration.protect", lambda value: f"protected:{value}")
@@ -44,8 +46,6 @@ async def test_two_users_keep_independent_registration_ids(monkeypatch):
         async def respond(self, text):
             self.responses.append(text)
 
-    # Importing the handler directly avoids requiring Telethon's event machinery
-    # while exercising the exact user -> registration -> update path.
     from app.telegram.admin.central_registration import registration_messages
 
     await asyncio.gather(
