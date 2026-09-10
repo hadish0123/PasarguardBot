@@ -9,7 +9,15 @@ from telethon.tl.custom import Message
 
 from app import Kenzo
 from app.logger import get_logger
-from app.services.central_registry import create_draft, get_active_for_owner, get_by_bot_id, get_by_id, protect, update_registration
+from app.services.central_registry import (
+    create_draft,
+    get_active_for_owner,
+    get_by_bot_id,
+    get_by_id,
+    get_pending_for_owner,
+    protect,
+    update_registration,
+)
 from app.services.panels.auth import panel_api_error_text, verify_panel_api_key
 from config import ADMIN_ID
 
@@ -33,12 +41,18 @@ def _clean_panel_url(value: str) -> str:
 
 
 def _main_menu():
-    return [[Button.inline("🤖 ثبت ربات نمایندگی", b"prime:register")], [Button.inline("🔎 پیگیری درخواست", b"prime:track")]]
+    return [
+        [Button.inline("🤖 ثبت ربات نمایندگی", b"prime:register")],
+        [Button.inline("🔎 پیگیری درخواست", b"prime:track")],
+    ]
 
 
 def _admin_buttons(registration_id: int):
     data = str(registration_id).encode()
-    return [[Button.inline("✅ تأیید و فعال‌سازی", b"prime:approve:" + data), Button.inline("❌ رد درخواست", b"prime:reject:" + data)]]
+    return [[
+        Button.inline("✅ تأیید و فعال‌سازی", b"prime:approve:" + data),
+        Button.inline("❌ رد درخواست", b"prime:reject:" + data),
+    ]]
 
 
 async def _get_me(token: str) -> dict:
@@ -64,24 +78,36 @@ async def _notify_admins(text: str, buttons=None) -> None:
 
 @Kenzo.on(events.NewMessage(pattern=r"^/start$"))
 async def central_start(event: Message) -> None:
-    await event.respond(f"🌐 **{BRAND}**\n\nبه سامانه مرکزی نمایندگان خوش آمدید.\nاز اینجا می‌توانید ربات فروش خودتان را ثبت و پس از تأیید فعال کنید.", buttons=_main_menu())
+    await event.respond(
+        f"🌐 **{BRAND}**\n\nبه سامانه مرکزی نمایندگان خوش آمدید.\n"
+        "از اینجا می‌توانید ربات فروش خودتان را ثبت و پس از تأیید فعال کنید.",
+        buttons=_main_menu(),
+    )
 
 
 @Kenzo.on(events.CallbackQuery(data=b"prime:register"))
 async def start_registration(event) -> None:
     user_id = int(event.sender_id)
-    existing = await get_active_for_owner(user_id)
+    # An already-active bot must NOT block the owner from registering another
+    # bot. Only an unfinished/pending registration is a blocking condition.
+    existing = await get_pending_for_owner(user_id)
     if existing:
-        await event.answer("برای شما یک درخواست فعال وجود دارد.", alert=True)
-        await event.edit(f"📋 درخواست فعال شما\n\nکد پیگیری: `{existing['tracking_code']}`\nوضعیت: `{existing['status']}`\nمرحله: `{existing['step']}`")
+        await event.answer("برای شما یک درخواست در حال ثبت یا فعال‌سازی وجود دارد.", alert=True)
+        await event.edit(
+            f"📋 درخواست در حال انجام شما\n\nکد پیگیری: `{existing['tracking_code']}`\n"
+            f"وضعیت: `{existing['status']}`\nمرحله: `{existing['step']}`"
+        )
         return
     try:
         registration_id = await create_draft(user_id, _tracking_code())
     except ValueError:
-        existing = await get_active_for_owner(user_id)
-        await event.answer("برای شما یک درخواست فعال وجود دارد.", alert=True)
+        existing = await get_pending_for_owner(user_id)
+        await event.answer("برای شما یک درخواست در حال ثبت یا فعال‌سازی وجود دارد.", alert=True)
         if existing:
-            await event.edit(f"📋 درخواست فعال شما\n\nکد پیگیری: `{existing['tracking_code']}`\nوضعیت: `{existing['status']}`\nمرحله: `{existing['step']}`")
+            await event.edit(
+                f"📋 درخواست در حال انجام شما\n\nکد پیگیری: `{existing['tracking_code']}`\n"
+                f"وضعیت: `{existing['status']}`\nمرحله: `{existing['step']}`"
+            )
         return
     await event.answer()
     await event.edit("1️⃣ **ثبت ربات**\n\nابتدا **نام برند** خود را ارسال کنید.\nمثال: `MyVPN`")
@@ -95,7 +121,10 @@ async def track_registration(event) -> None:
     if not registration:
         await event.edit("هیچ درخواست فعالی برای شما پیدا نشد.", buttons=_main_menu())
         return
-    await event.edit(f"🔎 **پیگیری درخواست**\n\nکد پیگیری: `{registration['tracking_code']}`\nوضعیت: `{registration['status']}`\nمرحله: `{registration['step']}`")
+    await event.edit(
+        f"🔎 **پیگیری درخواست**\n\nکد پیگیری: `{registration['tracking_code']}`\n"
+        f"وضعیت: `{registration['status']}`\nمرحله: `{registration['step']}`"
+    )
 
 
 @Kenzo.on(events.NewMessage(func=lambda e: e.is_private))
@@ -120,7 +149,10 @@ async def registration_messages(event: Message) -> None:
             await event.respond("❌ نام برند باید بین ۲ تا ۱۲۰ کاراکتر باشد. دوباره ارسال کنید.")
             return
         await update_registration(rid, brand=value, step="bot_token")
-        await event.respond("2️⃣ **اطلاعات ربات**\n\nتوکن رباتی که از BotFather گرفته‌اید را ارسال کنید.\nسپس شناسه عددی ربات هم از شما دریافت می‌شود.")
+        await event.respond(
+            "2️⃣ **اطلاعات ربات**\n\nتوکن رباتی که از BotFather گرفته‌اید را ارسال کنید.\n"
+            "سپس شناسه عددی ربات هم از شما دریافت می‌شود."
+        )
         return
 
     if step == "bot_token":
@@ -131,17 +163,31 @@ async def registration_messages(event: Message) -> None:
             return
         duplicate = await get_by_bot_id(int(me["id"]))
         if duplicate and int(duplicate["owner_user_id"]) != user_id:
-            await event.respond("❌ این ربات قبلاً توسط نماینده دیگری ثبت شده است. یک ربات جدید بسازید و توکن آن را ارسال کنید.")
+            await event.respond(
+                "❌ این ربات قبلاً توسط نماینده دیگری ثبت شده است. یک ربات جدید بسازید و توکن آن را ارسال کنید."
+            )
+            return
+        if duplicate and int(duplicate["id"]) != rid:
+            await event.respond("❌ این ربات قبلاً ثبت شده است. توکن یک ربات دیگر را ارسال کنید.")
             return
         current = await get_by_id(rid)
         if not current or int(current["owner_user_id"]) != user_id or current["step"] != "bot_token":
             return
         try:
-            await update_registration(rid, bot_token=protect(value), bot_id=int(me["id"]), bot_username=me.get("username"), step="bot_id")
+            await update_registration(
+                rid,
+                bot_token=protect(value),
+                bot_id=int(me["id"]),
+                bot_username=me.get("username"),
+                step="bot_id",
+            )
         except Exception:
             await event.respond("❌ این ربات قبلاً ثبت شده است. یک ربات جدید ارسال کنید.")
             return
-        await event.respond(f"✅ توکن صحیح است و ربات **@{me.get('username') or 'بدون‌نام'}** شناسایی شد.\n\nحالا **شناسه عددی ربات** را ارسال کنید.")
+        await event.respond(
+            f"✅ توکن صحیح است و ربات **@{me.get('username') or 'بدون‌نام'}** شناسایی شد.\n\n"
+            "حالا **شناسه عددی ربات** را ارسال کنید."
+        )
         return
 
     if step == "bot_id":
@@ -177,15 +223,29 @@ async def registration_messages(event: Message) -> None:
             current = await get_by_id(rid)
             await verify_panel_api_key(current["panel_url"], value)
         except Exception as exc:
-            await event.respond(f"❌ اتصال پنل تأیید نشد.\n\n`{panel_api_error_text(exc)}`\n\nاطلاعات صحیح را دوباره ارسال کنید.")
+            await event.respond(
+                f"❌ اتصال پنل تأیید نشد.\n\n`{panel_api_error_text(exc)}`\n\n"
+                "اطلاعات صحیح را دوباره ارسال کنید."
+            )
             return
-        await update_registration(rid, panel_api_key=protect(value), status="pending", step="awaiting_admin", rejection_reason=None)
+        await update_registration(
+            rid,
+            panel_api_key=protect(value),
+            status="pending",
+            step="awaiting_admin",
+            rejection_reason=None,
+        )
         current = await get_by_id(rid)
-        await event.respond(f"✅ پنل پاسارگاد با موفقیت تأیید شد.\n\n🎫 کد پیگیری: `{current['tracking_code']}`\n\nدرخواست شما برای مدیریت مرکزی ارسال شد.")
+        await event.respond(
+            f"✅ پنل پاسارگاد با موفقیت تأیید شد.\n\n🎫 کد پیگیری: `{current['tracking_code']}`\n\n"
+            "درخواست شما برای مدیریت مرکزی ارسال شد."
+        )
         await _notify_admins(
             "🆕 **درخواست نمایندگی جدید**\n\n"
-            f"🎫 کد: `{current['tracking_code']}`\n👤 کاربر: `{current['owner_user_id']}`\n🏷 برند: **{current['brand']}**\n"
-            f"🤖 ربات: @{current['bot_username'] or 'unknown'}\n🆔 Bot ID: `{current['bot_id']}`\n🌐 پنل: `{current['panel_url']}`\n👤 نام کاربری پنل: `{current['panel_username']}`\n\nAPI Key به‌صورت رمزنگاری‌شده ذخیره شده است.",
+            f"🎫 کد: `{current['tracking_code']}`\n👤 کاربر: `{current['owner_user_id']}`\n"
+            f"🏷 برند: **{current['brand']}**\n🤖 ربات: @{current['bot_username'] or 'unknown'}\n"
+            f"🆔 Bot ID: `{current['bot_id']}`\n🌐 پنل: `{current['panel_url']}`\n"
+            f"👤 نام کاربری پنل: `{current['panel_username']}`\n\nAPI Key به‌صورت رمزنگاری‌شده ذخیره شده است.",
             buttons=_admin_buttons(rid),
         )
 
@@ -212,7 +272,11 @@ async def approve_registration(event) -> None:
         if manager is None:
             raise RuntimeError("مدیر ربات‌های نمایندگی هنوز آماده نیست")
         await manager.start_for_registration(rid, provision=False)
-        await Kenzo.send_message(registration["owner_user_id"], f"🎉 **نمایندگی شما فعال شد!**\n\n🏷 برند: **{registration['brand']}**\n🎫 کد پیگیری: `{registration['tracking_code']}`\n\n🤖 ربات نمایندگی شما آماده استفاده است.")
+        await Kenzo.send_message(
+            registration["owner_user_id"],
+            f"🎉 **نمایندگی شما فعال شد!**\n\n🏷 برند: **{registration['brand']}**\n"
+            f"🎫 کد پیگیری: `{registration['tracking_code']}`\n\n🤖 ربات نمایندگی شما آماده استفاده است.",
+        )
         await event.edit("✅ فعال‌سازی کامل شد.", parse_mode=None)
     except Exception as exc:
         logger.exception("Representative activation failed: %s", exc)
@@ -233,4 +297,8 @@ async def reject_registration(event) -> None:
     await update_registration(rid, status="rejected", step="brand", rejection_reason="توسط مدیریت مرکزی رد شد")
     await event.answer("رد شد")
     await event.edit("❌ درخواست رد شد.", parse_mode=None)
-    await Kenzo.send_message(registration["owner_user_id"], f"❌ درخواست نمایندگی شما رد شد.\n\nکد پیگیری: `{registration['tracking_code']}`\nدوباره از منوی ثبت ربات اقدام کنید.")
+    await Kenzo.send_message(
+        registration["owner_user_id"],
+        f"❌ درخواست نمایندگی شما رد شد.\n\nکد پیگیری: `{registration['tracking_code']}`\n"
+        "می‌توانید از منوی ثبت ربات، اطلاعات جدید ارسال کنید.",
+    )
