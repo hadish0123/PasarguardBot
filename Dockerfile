@@ -19,16 +19,15 @@ RUN apt-get update \
         mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Pin uv so this layer is stable across builds.
 COPY --from=ghcr.io/astral-sh/uv:0.11.31 /uv /uvx /bin/
 
-# Railway's current builder rejects the old custom cache-mount IDs used here,
-# so dependency caching is provided by normal Docker layers instead.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# The Bot API migration changes the dependency graph; let uv refresh the lock
+# during the image build instead of failing on a stale frozen lock file.
+RUN uv sync --no-dev --no-install-project
 
 COPY . .
-RUN uv sync --frozen --no-dev
+RUN uv sync --no-dev
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh \
@@ -38,7 +37,7 @@ ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="PasarguardBot" \
       org.opencontainers.image.description="PasarguardBot Telegram management bot" \
-      org.opencontainers.image.source="https://github.com/AmirKenzo/PasarguardBot" \
+      org.opencontainers.image.source="https://github.com/hadish0123/PasarguardBot" \
       org.opencontainers.image.url="https://github.com/AmirKenzo/PasarguardBot" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
