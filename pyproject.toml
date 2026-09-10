@@ -58,7 +58,7 @@ line-ending = "auto"
 docstring-code-format = true
 docstring-code-line-length = 120
 
-[tool.dependency-groups]
+[dependency-groups]
 dev = [
     "aiosqlite>=0.21.0",
     "pytest>=8.4.0",
