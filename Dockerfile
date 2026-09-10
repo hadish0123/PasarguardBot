@@ -19,23 +19,21 @@ RUN apt-get update \
         mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Pin uv so this layer is stable across builds (avoid :latest digest churn).
+# Pin uv so this layer is stable across builds.
 COPY --from=ghcr.io/astral-sh/uv:0.11.31 /uv /uvx /bin/
 
-# Dependency layer: only invalidated when lock/metadata change.
+# Railway's current builder rejects the old custom cache-mount IDs used here,
+# so dependency caching is provided by normal Docker layers instead.
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,id=pasarguardbot-uv,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY . .
-RUN --mount=type=cache,id=pasarguardbot-uv,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh \
     && mkdir -p /app/logs /app/sessions
 
-# Version labels last — changing REVISION every commit must not bust dep cache.
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="PasarguardBot" \
