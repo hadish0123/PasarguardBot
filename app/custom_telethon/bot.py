@@ -50,13 +50,10 @@ class _Message:
         self._client = client
         self._data = data or {}
         self.id = self._data.get("message_id") or self._data.get("id")
-        # Ensure .data exists for all events (empty bytes for messages, callback data for callbacks)
         self.data = b""
-        # Ensure text and raw_text are always real strings, never objects
         self._text_value = self._data.get("text") or self._data.get("caption") or ""
         self.text = self._text_value
         self.raw_text = self._text_value
-        # Keep .message as self for compatibility (event.message.text should work)
         self.message = self
         self.chat_id = chat_id if chat_id is not None else (self._data.get("chat", {}) or {}).get("id")
         self.sender_id = (self._data.get("from", {}) or {}).get("id")
@@ -104,8 +101,6 @@ class _CallbackEvent:
         self._query = update.get("callback_query", {})
         self.id = self._query.get("id")
         self.data = (self._query.get("data") or "").encode()
-        # Ensure .text and .raw_text exist for all events (empty string for callbacks)
-        # This keeps both _Message and _CallbackEvent symmetric
         self.text = ""
         self.raw_text = ""
         self.sender_id = (self._query.get("from") or {}).get("id")
@@ -142,6 +137,7 @@ class TelegramClient:
         self._offset = 0
         self._stop = asyncio.Event()
         self._me = None
+        self._runtime_context_factory = None
 
     def add_event_handler(self, callback, event=None):
         self._handlers.append((callback, event))
@@ -153,11 +149,19 @@ class TelegramClient:
             return callback
         return decorator
 
+    def clone_handlers_from(self, source: "TelegramClient") -> None:
+        self._handlers = list(source._handlers)
+
+    def set_runtime_context_factory(self, factory) -> None:
+        self._runtime_context_factory = factory
+
     async def start(self, *args, bot_token=None, **kwargs):
         self._token = bot_token or os.getenv("BOT_TOKEN")
         if not self._token:
             raise ValueError("BOT_TOKEN is required")
         self._session = aiohttp.ClientSession()
+        self._stop.clear()
+        self._offset = 0
         self._me = await self._api("getMe")
         await self._api("deleteWebhook", drop_pending_updates=False)
         return self
@@ -191,6 +195,17 @@ class TelegramClient:
                 await asyncio.sleep(2)
 
     async def _dispatch(self, update):
+        if self._runtime_context_factory is not None:
+            from app.runtime.context import tenant_context
+
+            tenant = self._runtime_context_factory()
+            if tenant is None:
+                return await self._dispatch_inner(update)
+            with tenant_context(tenant):
+                return await self._dispatch_inner(update)
+        return await self._dispatch_inner(update)
+
+    async def _dispatch_inner(self, update):
         if "callback_query" in update:
             event = _CallbackEvent(self, update)
         elif "message" in update:
@@ -206,7 +221,7 @@ class TelegramClient:
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(
-                    "Handler filter failed for %s: %s; skipping handler and continuing to next",
+                    "Handler filter failed for %s: %s; skipping handler and continuing",
                     builder.__class__.__name__ if builder else "unknown",
                     e,
                 )
