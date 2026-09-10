@@ -26,6 +26,21 @@ jobs:
         env:
           PYTHONPATH: .
         run: uv run --no-sync ruff check app/services/representative_provisioner.py app/services/central_registry.py app/telegram/admin/central_registration.py tests/test_central_registration_isolation.py tests/test_representative_provisioning.py
+      - name: Audit full Ruff status
+        run: |
+          set +e
+          uv run --no-sync ruff check --output-format concise > full-ruff.txt 2>&1
+          status=$?
+          cat full-ruff.txt
+          echo "Ruff exit code: $status"
+          exit 0
+      - name: Upload full Ruff audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-ruff-audit
+          path: full-ruff.txt
+          if-no-files-found: error
       - name: Test runtime context isolation
         env:
           PYTHONPATH: .
