@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from app.db.base import AsyncSessionLocal
+from app.db.base import CentralSessionLocal
 from app.utils.security.crypto import decrypt_data, encrypt_data
 
 CREATE_TABLE_SQL = """
@@ -35,12 +35,9 @@ def _row(row) -> dict:
 
 
 async def ensure_registry() -> None:
-    async with AsyncSessionLocal() as session:
+    async with CentralSessionLocal() as session:
         await session.execute(text(CREATE_TABLE_SQL))
-        columns = {
-            row[0]
-            for row in (await session.execute(text("SHOW COLUMNS FROM bot_registrations"))).all()
-        }
+        columns = {row[0] for row in (await session.execute(text("SHOW COLUMNS FROM bot_registrations"))).all()}
         for name, ddl in (
             ("railway_service_id", "ALTER TABLE bot_registrations ADD COLUMN railway_service_id VARCHAR(128) NULL"),
             ("railway_environment_id", "ALTER TABLE bot_registrations ADD COLUMN railway_environment_id VARCHAR(128) NULL"),
@@ -51,11 +48,11 @@ async def ensure_registry() -> None:
 
 
 async def get_active_for_owner(owner_user_id: int):
-    async with AsyncSessionLocal() as session:
+    async with CentralSessionLocal() as session:
         result = await session.execute(
             text(
                 "SELECT * FROM bot_registrations "
-                "WHERE owner_user_id=:owner AND status IN ('draft','pending','approved') "
+                "WHERE owner_user_id=:owner AND status IN ('draft','pending','approved','provisioning','active') "
                 "ORDER BY id DESC LIMIT 1"
             ),
             {"owner": owner_user_id},
@@ -65,7 +62,9 @@ async def get_active_for_owner(owner_user_id: int):
 
 
 async def create_draft(owner_user_id: int, tracking_code: str):
-    async with AsyncSessionLocal() as session:
+    async with CentralSessionLocal() as session:
+        # The application-level check is still useful for a friendly response;
+        # the unique tracking code plus transaction make the insert deterministic.
         await session.execute(
             text(
                 "INSERT INTO bot_registrations "
@@ -86,10 +85,8 @@ async def create_draft(owner_user_id: int, tracking_code: str):
 
 
 async def get_by_id(registration_id: int):
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            text("SELECT * FROM bot_registrations WHERE id=:id LIMIT 1"), {"id": registration_id}
-        )
+    async with CentralSessionLocal() as session:
+        result = await session.execute(text("SELECT * FROM bot_registrations WHERE id=:id LIMIT 1"), {"id": registration_id})
         row = result.first()
         return _row(row) if row else None
 
@@ -109,14 +106,16 @@ async def update_registration(registration_id: int, **values) -> None:
         assignments.append(f"{key}=:{key}")
         params[key] = value
     assignments.append("updated_at=CURRENT_TIMESTAMP")
-    async with AsyncSessionLocal() as session:
+    async with CentralSessionLocal() as session:
         await session.execute(text(f"UPDATE bot_registrations SET {', '.join(assignments)} WHERE id=:id"), params)
         await session.commit()
 
 
 async def get_approved():
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(text("SELECT * FROM bot_registrations WHERE status='approved' ORDER BY id ASC"))
+    async with CentralSessionLocal() as session:
+        result = await session.execute(
+            text("SELECT * FROM bot_registrations WHERE status IN ('approved','provisioning','active') ORDER BY id ASC")
+        )
         return [_row(row) for row in result.fetchall()]
 
 
