@@ -22,19 +22,15 @@ jobs:
         run: uv sync --frozen
       - name: Compile runtime and tests
         run: uv run --no-sync python -m compileall -q app tests
-      - name: Run regression suite
+      - name: Test runtime context isolation
         env:
           PYTHONPATH: .
-        run: |
-          set +e
-          uv run --no-sync pytest -vv tests/test_multi_bot_runtime_isolation.py tests/test_central_registration_isolation.py tests/test_representative_provisioning.py > test-results.txt 2>&1
-          status=$?
-          cat test-results.txt
-          exit $status
-      - name: Upload regression output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: multi-bot-regression-output
-          path: test-results.txt
-          if-no-files-found: error
+        run: uv run --no-sync pytest -q tests/test_multi_bot_runtime_isolation.py
+      - name: Test central registration isolation
+        env:
+          PYTHONPATH: .
+        run: uv run --no-sync pytest -q tests/test_central_registration_isolation.py
+      - name: Test tenant provisioning and multi-registration
+        env:
+          PYTHONPATH: .
+        run: uv run --no-sync pytest -q tests/test_representative_provisioning.py
