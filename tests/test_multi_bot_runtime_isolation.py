@@ -1,13 +1,14 @@
 import ast
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("pasarguard_runtime_context_test", ROOT / "app/runtime/context.py")
 _context = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _context
 assert _spec.loader is not None
 _spec.loader.exec_module(_context)
 TenantRuntime = _context.TenantRuntime
@@ -16,17 +17,7 @@ tenant_context = _context.tenant_context
 
 
 def tenant(registration_id: int, owner: int, bot_id: int) -> TenantRuntime:
-    return TenantRuntime(
-        registration_id=registration_id,
-        owner_user_id=owner,
-        bot_id=bot_id,
-        bot_username=f"bot{bot_id}",
-        brand=f"Brand {registration_id}",
-        database_url=f"sqlite+aiosqlite:///tenant_{registration_id}.db",
-        panel_url="https://panel.example",
-        panel_username="admin",
-        panel_api_key="secret",
-    )
+    return TenantRuntime(registration_id, owner, bot_id, f"bot{bot_id}", f"Brand {registration_id}", f"sqlite+aiosqlite:///tenant_{registration_id}.db", "https://panel.example", "admin", "secret")
 
 
 def test_context_isolation():
