@@ -44,6 +44,9 @@ class _Builder:
             return False
         if self.pattern is not None:
             text = getattr(event, "raw_text", None) or getattr(event, "text", "") or ""
+            # Ensure text is a string, not an object
+            if not isinstance(text, str):
+                text = str(text) if text else ""
             if re.match(self.pattern, text) is None:
                 return False
         if self.data is not None:
