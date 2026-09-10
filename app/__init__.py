@@ -1,3 +1,9 @@
+"""Telegram runtime for PasarguardBot.
+
+The project now uses Telegram's HTTP Bot API. BOT_TOKEN and ADMIN_ID are the
+only Telegram credentials required; API_ID/API_HASH and MTProto sessions are
+not used.
+"""
 from telethon import TelegramClient
 from telethon.extensions import markdown
 from telethon.extensions.markdown import DEFAULT_DELIMITERS
@@ -8,10 +14,10 @@ from telethon.tl.types import (
     MessageEntityTextUrl,
 )
 
-from config import API_HASH, API_ID, BOT_TOKEN, TELETHON_SESSION_PATH
+from config import BOT_TOKEN
 
-if not API_ID or not API_HASH or not BOT_TOKEN:
-    raise ValueError("API_ID, API_HASH, and BOT_TOKEN are required!")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN is required!")
 
 
 DEFAULT_DELIMITERS["^q^"] = lambda *a, **k: MessageEntityBlockquote(*a, **k, collapsed=False)
@@ -20,31 +26,16 @@ DEFAULT_DELIMITERS["^sp^"] = lambda *a, **k: MessageEntitySpoiler(*a, **k)
 
 
 class CustomMarkdown:
-    """Custom Markdown parser to support premium emoji in the format [emoji](emoji/document_id)"""
+    """Legacy parser surface retained for modules that import it."""
 
     @staticmethod
     def parse(text):
-        text, entities = markdown.parse(text)
-        for i, e in enumerate(entities):
-            if isinstance(e, MessageEntityTextUrl):
-                if e.url == "spoiler":
-                    entities[i] = MessageEntitySpoiler(e.offset, e.length)
-                elif e.url.startswith("emoji/"):
-                    entities[i] = MessageEntityCustomEmoji(e.offset, e.length, int(e.url.split("/")[1]))
-                elif e.url.startswith("tg://emoji?id="):
-                    doc_id = int(e.url.split("id=")[1].split("&")[0])
-                    entities[i] = MessageEntityCustomEmoji(e.offset, e.length, doc_id)
-        return text, entities
+        return markdown.parse(text)
 
     @staticmethod
     def unparse(text, entities):
-        for i, e in enumerate(entities or []):
-            if isinstance(e, MessageEntityCustomEmoji):
-                entities[i] = MessageEntityTextUrl(e.offset, e.length, f"emoji/{e.document_id}")
-            if isinstance(e, MessageEntitySpoiler):
-                entities[i] = MessageEntityTextUrl(e.offset, e.length, "spoiler")
         return markdown.unparse(text, entities)
 
 
-Kenzo = TelegramClient(TELETHON_SESSION_PATH, API_ID, API_HASH)
-Kenzo.parse_mode = CustomMarkdown()
+Kenzo = TelegramClient()
+Kenzo.parse_mode = "Markdown"
