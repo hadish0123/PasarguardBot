@@ -61,10 +61,27 @@ async def get_active_for_owner(owner_user_id: int):
         return _row(row) if row else None
 
 
+async def get_by_bot_id(bot_id: int):
+    async with CentralSessionLocal() as session:
+        result = await session.execute(
+            text("SELECT * FROM bot_registrations WHERE bot_id=:bot_id LIMIT 1"), {"bot_id": bot_id}
+        )
+        row = result.first()
+        return _row(row) if row else None
+
+
 async def create_draft(owner_user_id: int, tracking_code: str):
     async with CentralSessionLocal() as session:
-        # The application-level check is still useful for a friendly response;
-        # the unique tracking code plus transaction make the insert deterministic.
+        existing = await session.execute(
+            text(
+                "SELECT id FROM bot_registrations WHERE owner_user_id=:owner "
+                "AND status IN ('draft','pending','approved','provisioning','active') "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"owner": owner_user_id},
+        )
+        if existing.first():
+            raise ValueError("برای این کاربر یک درخواست فعال وجود دارد.")
         await session.execute(
             text(
                 "INSERT INTO bot_registrations "
@@ -74,10 +91,7 @@ async def create_draft(owner_user_id: int, tracking_code: str):
             {"tracking": tracking_code, "owner": owner_user_id},
         )
         await session.commit()
-        result = await session.execute(
-            text("SELECT id FROM bot_registrations WHERE tracking_code=:tracking LIMIT 1"),
-            {"tracking": tracking_code},
-        )
+        result = await session.execute(text("SELECT id FROM bot_registrations WHERE tracking_code=:tracking LIMIT 1"), {"tracking": tracking_code})
         row = result.first()
         if not row:
             raise RuntimeError("Could not create registration record")
@@ -100,7 +114,7 @@ async def update_registration(registration_id: int, **values) -> None:
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
         return
-    assignments: list[str] = []
+    assignments = []
     params: dict[str, object] = {"id": registration_id}
     for key, value in values.items():
         assignments.append(f"{key}=:{key}")
@@ -113,9 +127,7 @@ async def update_registration(registration_id: int, **values) -> None:
 
 async def get_approved():
     async with CentralSessionLocal() as session:
-        result = await session.execute(
-            text("SELECT * FROM bot_registrations WHERE status IN ('approved','provisioning','active') ORDER BY id ASC")
-        )
+        result = await session.execute(text("SELECT * FROM bot_registrations WHERE status IN ('approved','provisioning','active') ORDER BY id ASC"))
         return [_row(row) for row in result.fetchall()]
 
 
