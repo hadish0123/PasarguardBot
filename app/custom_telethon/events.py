@@ -53,19 +53,31 @@ class _Builder:
             actual = getattr(event, "data", b"")
             expected = self.data
             if isinstance(expected, bytes):
+                # Expected is bytes (or has .match for bytes regex)
                 if isinstance(actual, str):
                     actual = actual.encode()
                 if hasattr(expected, "match"):
+                    # Bytes regex object
                     if expected.match(actual) is None:
                         return False
                 elif actual != expected:
                     return False
             else:
+                # Expected is not bytes (could be string or regex object)
                 if isinstance(actual, bytes):
                     actual = actual.decode(errors="ignore")
                 if hasattr(expected, "match"):
-                    if expected.match(actual) is None:
-                        return False
+                    # Regex object - ensure it can match against string
+                    # If regex was compiled from bytes, convert it to work with string
+                    try:
+                        if expected.match(actual) is None:
+                            return False
+                    except TypeError:
+                        # Regex was compiled from bytes (rb"...") but actual is string
+                        # Try matching bytes version
+                        actual_bytes = actual.encode()
+                        if expected.match(actual_bytes) is None:
+                            return False
                 elif actual != expected:
                     return False
         if self.func is not None:
