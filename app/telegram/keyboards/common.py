@@ -155,7 +155,13 @@ def styled_url_button(text: str, url: str, style_obj=None):
 
 def styled_simple_webview_button(text: str, url: str, style_obj=None):
     # Normal (non-inline) keyboard button, unlike styled_webview_button which is inline-only.
-    return KeyboardButton(text=text, type=ButtonTypeSimpleWebView(url=url), style=style_obj)
+    from telethon.tl.types import KeyboardButtonSimpleWebView
+    
+    return KeyboardButtonSimpleWebView(
+        text=text,
+        url=url,
+        style=style_obj,
+    )
 
 
 def styled_reply_button(text: str, style_obj=None):
