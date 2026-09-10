@@ -7,7 +7,6 @@ from urllib.parse import quote_plus, urlsplit, urlunsplit
 import httpx
 from sqlalchemy.engine import make_url
 
-from app.db.base import AsyncSessionLocal
 from app.services.central_registry import get_by_id, reveal
 from config import SQLALCHEMY_DATABASE_URL
 
@@ -33,11 +32,8 @@ def _db_url(database: str) -> str:
 
 
 async def _create_database(database: str) -> None:
-    # Use the same MariaDB credentials. The Railway MariaDB template's application
-    # user is expected to have database-creation rights; if not, use MYSQL_ROOT_URL.
     root_url = os.getenv("MYSQL_ROOT_URL", "").strip() or SQLALCHEMY_DATABASE_URL
-    parsed = make_url(root_url)
-    parsed = parsed.set(database="mysql")
+    parsed = make_url(root_url).set(database="mysql")
     import asyncmy
 
     conn = await asyncmy.connect(
@@ -51,7 +47,9 @@ async def _create_database(database: str) -> None:
     try:
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "", database)
         async with conn.cursor() as cursor:
-            await cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{safe_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            await cursor.execute(
+                f"CREATE DATABASE IF NOT EXISTS `{safe_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
     finally:
         conn.close()
 
@@ -103,16 +101,16 @@ async def provision_representative(registration_id: int) -> dict:
             }
         },
     )
-    service = service_data["serviceCreate"]
-    service_id = service["id"]
+    service_id = service_data["serviceCreate"]["id"]
 
+    # Telegram Bot API needs only BOT_TOKEN. Numeric ADMIN_ID is the owner/admin
+    # of this isolated representative instance. No API_ID/API_HASH/session is
+    # created or copied to representative services.
     variables = {
-        "API_ID": os.getenv("API_ID", ""),
-        "API_HASH": os.getenv("API_HASH", ""),
         "BOT_TOKEN": token,
         "ADMIN_ID": str(registration["owner_user_id"]),
         "BOT_TAG": registration["brand"],
-        "ADMIN_ID_TAG": registration["owner_user_id"],
+        "ADMIN_ID_TAG": str(registration["owner_user_id"]),
         "BOT_ROLE": "representative",
         "REPRESENTATIVE_ID": str(registration_id),
         "REP_PANEL_URL": registration["panel_url"],
