@@ -18,7 +18,15 @@ jobs:
         run: uv sync --frozen
       - name: Compile runtime and tests
         run: uv run --no-sync python -m compileall -q app tests
-      - name: Run multi-bot isolation and provisioning tests
+      - name: Test runtime context isolation
         env:
           PYTHONPATH: .
-        run: uv run --no-sync pytest -q tests/test_multi_bot_runtime_isolation.py tests/test_central_registration_isolation.py tests/test_representative_provisioning.py
+        run: uv run --no-sync pytest -q tests/test_multi_bot_runtime_isolation.py
+      - name: Test central registration isolation
+        env:
+          PYTHONPATH: .
+        run: uv run --no-sync pytest -q tests/test_central_registration_isolation.py
+      - name: Test tenant provisioning and multi-registration
+        env:
+          PYTHONPATH: .
+        run: uv run --no-sync pytest -q tests/test_representative_provisioning.py
