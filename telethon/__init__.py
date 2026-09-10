@@ -4,7 +4,7 @@ This project intentionally does not use Telegram MTProto/API credentials.
 All network traffic goes through Telegram's HTTP Bot API using BOT_TOKEN only.
 """
 from .bot import TelegramClient, _Message
-from . import events
+from . import events, utils
 from .button import Button
 
 _original_message_getattribute = _Message.__getattribute__
@@ -37,4 +37,4 @@ async def _edit_message(self, entity, message, text=None, **kwargs):
     return await _original_edit_message(self, entity, message, text, **kwargs)
 TelegramClient.edit_message = _edit_message
 
-__all__ = ["TelegramClient", "events", "Button"]
+__all__ = ["TelegramClient", "events", "utils", "Button"]
