@@ -58,9 +58,13 @@ async def main():
         signal.signal(signal.SIGTERM, _signal_handler)
 
     from app.db.crud.secrets import ensure_secrets
+    from app.services.central_registry import ensure_registry
+    from app.services.representative_bootstrap import ensure_representative_panel
 
     await ensure_secrets()
-    logger.info("%s Secrets loaded from database", LogTag.BOOT)
+    await ensure_registry()
+    await ensure_representative_panel()
+    logger.info("%s Secrets, registry, and representative bootstrap ready", LogTag.BOOT)
 
     api_task = None
     server = None
