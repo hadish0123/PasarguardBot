@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator
 
 
 @dataclass(frozen=True)
@@ -20,10 +20,15 @@ class TenantRuntime:
 
 
 _current_tenant: ContextVar[TenantRuntime | None] = ContextVar("pasarguard_current_tenant", default=None)
+_current_client: ContextVar[object | None] = ContextVar("pasarguard_current_client", default=None)
 
 
 def get_current_tenant() -> TenantRuntime | None:
     return _current_tenant.get()
+
+
+def get_current_client():
+    return _current_client.get()
 
 
 def is_representative_runtime() -> bool:
@@ -37,3 +42,12 @@ def tenant_context(tenant: TenantRuntime) -> Iterator[TenantRuntime]:
         yield tenant
     finally:
         _current_tenant.reset(token)
+
+
+@contextmanager
+def client_context(client) -> Iterator[object]:
+    token = _current_client.set(client)
+    try:
+        yield client
+    finally:
+        _current_client.reset(token)
