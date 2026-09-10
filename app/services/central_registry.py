@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy import text
 
 from app.db.base import AsyncSessionLocal
@@ -13,7 +11,7 @@ CREATE TABLE IF NOT EXISTS bot_registrations (
     tracking_code VARCHAR(32) NOT NULL UNIQUE,
     owner_user_id BIGINT NOT NULL,
     brand VARCHAR(120) NOT NULL,
-    bot_id BIGINT NOT NULL UNIQUE,
+    bot_id BIGINT NULL UNIQUE,
     bot_username VARCHAR(255) NULL,
     bot_token TEXT NOT NULL,
     panel_url VARCHAR(512) NOT NULL,
@@ -23,6 +21,8 @@ CREATE TABLE IF NOT EXISTS bot_registrations (
     step VARCHAR(32) NOT NULL DEFAULT 'brand',
     rejection_reason TEXT NULL,
     tenant_db_name VARCHAR(64) NULL,
+    railway_service_id VARCHAR(128) NULL,
+    railway_environment_id VARCHAR(128) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     approved_at DATETIME NULL
@@ -37,6 +37,17 @@ def _row(row) -> dict:
 async def ensure_registry() -> None:
     async with AsyncSessionLocal() as session:
         await session.execute(text(CREATE_TABLE_SQL))
+        # Safe upgrades for databases created by the first development revision.
+        columns = {
+            row[0]
+            for row in (await session.execute(text("SHOW COLUMNS FROM bot_registrations"))).all()
+        }
+        for name, ddl in (
+            ("railway_service_id", "ALTER TABLE bot_registrations ADD COLUMN railway_service_id VARCHAR(128) NULL"),
+            ("railway_environment_id", "ALTER TABLE bot_registrations ADD COLUMN railway_environment_id VARCHAR(128) NULL"),
+        ):
+            if name not in columns:
+                await session.execute(text(ddl))
         await session.commit()
 
 
@@ -60,12 +71,12 @@ async def create_draft(owner_user_id: int, tracking_code: str):
             text(
                 "INSERT INTO bot_registrations "
                 "(tracking_code, owner_user_id, brand, bot_id, bot_token, panel_url, panel_username, panel_api_key, status, step) "
-                "VALUES (:tracking,:owner,'',0,'','','','', 'draft','brand')"
+                "VALUES (:tracking,:owner,'',NULL,'','','','', 'draft','brand')"
             ),
             {"tracking": tracking_code, "owner": owner_user_id},
         )
         await session.commit()
-        return result.lastrowid
+        return int(result.lastrowid)
 
 
 async def get_by_id(registration_id: int):
@@ -90,6 +101,8 @@ async def update_registration(registration_id: int, **values) -> None:
         "step",
         "rejection_reason",
         "tenant_db_name",
+        "railway_service_id",
+        "railway_environment_id",
         "approved_at",
     }
     values = {key: value for key, value in values.items() if key in allowed}
@@ -122,7 +135,3 @@ def protect(value: str) -> str:
 
 def reveal(value: str) -> str:
     return decrypt_data(value)
-
-
-def now() -> datetime:
-    return datetime.utcnow()
