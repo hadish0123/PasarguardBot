@@ -9,6 +9,10 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: "123456:TEST_TOKEN"
+      ADMIN_ID: "1"
+      SQLALCHEMY_DATABASE_URL: "mysql+asyncmy://test:test@127.0.0.1/test"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -18,9 +22,12 @@ jobs:
         with:
           python-version: "3.14"
       - name: Compile Python files
-        run: python -m compileall -q app telethon
+        run: python -m compileall -q app
       - name: Verify forbidden Telegram credentials are absent from runtime config
         run: |
           ! grep -R --line-number --exclude-dir=.git --exclude=uv.lock -E '^[[:space:]]*(API_ID|API_HASH|TELETHON_SESSION_PATH)[[:space:]]*=' config.py .env.example
       - name: Resolve dependencies
         run: uv lock
+      - name: Verify real Telethon imports and application module loading
+        run: |
+          python -c "import telethon, telethon.utils; import telethon.tl.functions.help; from telethon.tl.custom import Button; from telethon.errors import MessageTooLongError; import aiofasttelethonhelper; import app.telegram; print('telethon=', telethon.__file__); print('app.telegram import OK')"
