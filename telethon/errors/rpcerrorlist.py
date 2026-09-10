@@ -1,12 +1,15 @@
-class MessageNotModifiedError(Exception):
+class RPCError(Exception):
     pass
-class MessageIdInvalidError(Exception):
+
+class MessageNotModifiedError(RPCError):
     pass
-class UserNotParticipantError(Exception):
+class MessageIdInvalidError(RPCError):
     pass
-class ChatAdminRequiredError(Exception):
+class UserNotParticipantError(RPCError):
     pass
-class FloodWaitError(Exception):
+class ChatAdminRequiredError(RPCError):
+    pass
+class FloodWaitError(RPCError):
     def __init__(self, seconds=1):
         self.seconds = seconds
         super().__init__(f"Flood wait: {seconds}s")
