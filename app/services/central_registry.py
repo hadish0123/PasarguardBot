@@ -48,11 +48,27 @@ async def ensure_registry() -> None:
 
 
 async def get_active_for_owner(owner_user_id: int):
+    """Return the newest registration relevant to the owner for tracking/UI."""
     async with CentralSessionLocal() as session:
         result = await session.execute(
             text(
                 "SELECT * FROM bot_registrations "
                 "WHERE owner_user_id=:owner AND status IN ('draft','pending','approved','provisioning','active') "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"owner": owner_user_id},
+        )
+        row = result.first()
+        return _row(row) if row else None
+
+
+async def get_pending_for_owner(owner_user_id: int):
+    """Return only an unfinished registration that must block a new one."""
+    async with CentralSessionLocal() as session:
+        result = await session.execute(
+            text(
+                "SELECT * FROM bot_registrations "
+                "WHERE owner_user_id=:owner AND status IN ('draft','pending','approved','provisioning') "
                 "ORDER BY id DESC LIMIT 1"
             ),
             {"owner": owner_user_id},
@@ -75,13 +91,13 @@ async def create_draft(owner_user_id: int, tracking_code: str):
         existing = await session.execute(
             text(
                 "SELECT id FROM bot_registrations WHERE owner_user_id=:owner "
-                "AND status IN ('draft','pending','approved','provisioning','active') "
+                "AND status IN ('draft','pending','approved','provisioning') "
                 "ORDER BY id DESC LIMIT 1"
             ),
             {"owner": owner_user_id},
         )
         if existing.first():
-            raise ValueError("برای این کاربر یک درخواست فعال وجود دارد.")
+            raise ValueError("برای این کاربر یک درخواست در حال ثبت یا فعال‌سازی وجود دارد.")
         await session.execute(
             text(
                 "INSERT INTO bot_registrations "
