@@ -1,4 +1,4 @@
-"""Telethon client lifecycle and API event logging."""
+"""Telegram client lifecycle and API event logging."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar
 
-from telethon import TelegramClient
+from app.custom_telethon import TelegramClient
 from telethon.errors import FloodWaitError, RPCError
 
 from app.logger.setup import get_logger, log as log_event, log_exception, log_flood_wait
@@ -119,19 +119,12 @@ async def run_with_flood_log(
     context: str,
     user_id: int | None = None,
 ) -> Any:
-    """Execute a coroutine and log FloodWait / RPC errors consistently."""
+    """Run a Telegram coroutine and log flood waits/errors consistently."""
     try:
         return await coro_factory()
     except FloodWaitError as e:
         log_flood_wait(logger, e.seconds, context=context, user_id=user_id)
         raise
     except RPCError as e:
-        log_exception(
-            logger,
-            "Telegram API call failed",
-            exc=e,
-            context=context,
-            user_id=user_id,
-            error=type(e).__name__,
-        )
+        log_exception(logger, "Telegram API error", exc=e, context=context, user_id=user_id)
         raise
