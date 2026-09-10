@@ -104,6 +104,10 @@ class _CallbackEvent:
         self._query = update.get("callback_query", {})
         self.id = self._query.get("id")
         self.data = (self._query.get("data") or "").encode()
+        # Ensure .text and .raw_text exist for all events (empty string for callbacks)
+        # This keeps both _Message and _CallbackEvent symmetric
+        self.text = ""
+        self.raw_text = ""
         self.sender_id = (self._query.get("from") or {}).get("id")
         self.chat_id = ((self._query.get("message") or {}).get("chat") or {}).get("id")
         self.message = _Message(client, self._query.get("message") or {}, self.chat_id) if self._query.get("message") else None
