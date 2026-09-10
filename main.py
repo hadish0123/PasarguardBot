@@ -9,7 +9,6 @@ from app.jobs.scheduler import scheduler
 from app.telegram import run_telethon
 from config import ENABLE_FASTAPI, FAST_API_PORT
 
-# Ensure project root is on sys.path (uv run / direct execution)
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -30,8 +29,7 @@ logger = get_logger("main")
 
 if sys.platform != "win32":
     try:
-        import uvloop  # pyright: ignore[reportMissingImports]
-
+        import uvloop
         uvloop.install()
         logger.info("%s uvloop enabled", LogTag.BOOT)
     except ImportError:
@@ -52,7 +50,6 @@ async def main():
     def _signal_handler(signum, _frame):
         loop.call_soon_threadsafe(_handle, signum)
 
-    # SIGINT works on Windows; SIGTERM is Unix-only.
     signal.signal(signal.SIGINT, _signal_handler)
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, _signal_handler)
@@ -70,9 +67,7 @@ async def main():
     server = None
 
     if ENABLE_FASTAPI:
-        # Import FastAPI app only when the API is enabled (avoids unused app/RAM).
         from app.routers import api_app as fastapi_app
-
         config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=FAST_API_PORT, log_level="info")
         server = uvicorn.Server(config)
         api_task = asyncio.create_task(server.serve())
@@ -108,7 +103,7 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt, SystemExit, asyncio.CancelledError:
+    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
         if scheduler.running:
             scheduler.shutdown(wait=False)
     except RuntimeError as e:
