@@ -51,8 +51,6 @@ def _upgrade_sync(database_url: str) -> None:
 
 
 async def migrate_tenant_database(database_url: str) -> None:
-    # Alembic's environment creates its own async engine/event loop, therefore
-    # run it in a worker thread instead of nesting asyncio.run() in the bot loop.
     await asyncio.to_thread(_upgrade_sync, database_url)
 
 
@@ -66,18 +64,11 @@ async def provision_representative(registration_id: int) -> dict:
     database_url = tenant_database_url(database)
     await migrate_tenant_database(database_url)
 
-    # Validate that the stored secrets can still be decrypted before the bot is
-    # allowed to enter the runtime manager.
     reveal(registration["bot_token"])
     reveal(registration["panel_api_key"])
 
-    # All representatives now run inside the single Railway service. These
-    # fields are metadata only; no per-representative Railway service is created.
-    central_service_id = os.getenv("RAILWAY_SERVICE_ID", "").strip() or None
-    environment_id = os.getenv("RAILWAY_ENVIRONMENT_ID", "").strip() or None
-
     return {
         "tenant_db_name": database,
-        "railway_service_id": central_service_id,
-        "railway_environment_id": environment_id,
+        "railway_service_id": os.getenv("RAILWAY_SERVICE_ID", "").strip() or None,
+        "railway_environment_id": os.getenv("RAILWAY_ENVIRONMENT_ID", "").strip() or None,
     }
