@@ -109,13 +109,24 @@ async def track_registration(event) -> None:
 async def registration_messages(event: Message) -> None:
     if not event.raw_text or event.raw_text.startswith("/"):
         return
-    registration = await get_active_for_owner(int(event.sender_id))
+
+    user_id = int(event.sender_id)
+    registration = await get_active_for_owner(user_id)
     if not registration or registration["status"] not in {"draft", "rejected"}:
         return
 
     rid = int(registration["id"])
     step = registration["step"]
     value = event.raw_text.strip()
+
+    # Re-read by ID immediately before mutating so the message is bound to the
+    # exact registration selected for this user, rather than relying on a stale
+    # snapshot if another update for the same user completed concurrently.
+    current = await get_by_id(rid)
+    if not current or int(current["owner_user_id"]) != user_id:
+        return
+    if current["status"] not in {"draft", "rejected"} or current["step"] != step:
+        return
 
     if step == "brand":
         if not 2 <= len(value) <= 120:
@@ -133,6 +144,15 @@ async def registration_messages(event: Message) -> None:
         except Exception as exc:
             await event.respond(f"❌ توکن نامعتبر است. دلیل: `{exc}`\nدوباره توکن صحیح را ارسال کنید.")
             return
+
+        # The database row is the source of truth. Only this user's registration
+        # ID is updated, so concurrent users cannot overwrite each other's token.
+        current = await get_by_id(rid)
+        if not current or int(current["owner_user_id"]) != user_id:
+            return
+        if current["status"] not in {"draft", "rejected"} or current["step"] != "bot_token":
+            return
+
         await update_registration(
             rid,
             bot_token=protect(value),
@@ -193,7 +213,7 @@ async def registration_messages(event: Message) -> None:
         )
         current = await get_by_id(rid)
         await event.respond(
-            f"✅ پنل پاسارگارد با موفقیت تأیید شد.\n\n🎫 کد پیگیری: `{current['tracking_code']}`\n\nدرخواست شما برای مدیریت مرکزی ارسال شد. پس از تأیید، ربات نمایندگی با برند شما فعال می‌شود."
+            f"✅ پنل پاسارگاد با موفقیت تأیید شد.\n\n🎫 کد پیگیری: `{current['tracking_code']}`\n\nدرخواست شما برای مدیریت مرکزی ارسال شد. پس از تأیید، ربات نمایندگی با برند شما فعال می‌شود."
         )
         admin_text = (
             "🆕 **درخواست نمایندگی جدید**\n\n"
