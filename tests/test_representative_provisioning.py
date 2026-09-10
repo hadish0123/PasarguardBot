@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 
@@ -43,9 +41,12 @@ async def test_create_database_grants_application_user(monkeypatch):
     monkeypatch.setenv("MYSQLHOST_PRIVATE", "mariadb.railway.internal")
     monkeypatch.setenv("MYSQLPORT_PRIVATE", "3306")
     monkeypatch.delenv("MYSQL_ROOT_URL", raising=False)
-    monkeypatch.setattr(provisioner.os, "environ", provisioner.os.environ)
     monkeypatch.setattr("asyncmy.connect", FakeAsyncMy.connect)
-    monkeypatch.setattr(provisioner, "SQLALCHEMY_DATABASE_URL", "mysql+asyncmy://mariadb:app-pass@mariadb.railway.internal:3306/primevpn")
+    monkeypatch.setattr(
+        provisioner,
+        "SQLALCHEMY_DATABASE_URL",
+        "mysql+asyncmy://mariadb:app-pass@mariadb.railway.internal:3306/primevpn",
+    )
 
     await provisioner._create_database("primevpn_rep_2")
 
@@ -69,19 +70,32 @@ async def test_multiple_registrations_are_allowed_after_activation(monkeypatch):
     class FakeSession:
         async def execute(self, statement, params=None):
             sql = str(statement)
+            if "SELECT id FROM bot_registrations WHERE tracking_code" in sql:
+                return FakeResult((rows[-1]["id"],))
             if "SELECT id FROM bot_registrations" in sql:
-                pending = next((r for r in rows if r["owner_user_id"] == params["owner"] and r["status"] in {"draft", "pending", "approved", "provisioning"}), None)
+                pending = next(
+                    (
+                        r
+                        for r in rows
+                        if r["owner_user_id"] == params["owner"]
+                        and r["status"] in {"draft", "pending", "approved", "provisioning"}
+                    ),
+                    None,
+                )
                 return FakeResult((pending["id"],) if pending else None)
             if "INSERT INTO bot_registrations" in sql:
                 rid = len(rows) + 1
                 rows.append({"id": rid, "owner_user_id": params["owner"], "status": "draft"})
                 return FakeResult()
             if "SELECT * FROM bot_registrations WHERE owner_user_id" in sql:
-                active = [r for r in rows if r["owner_user_id"] == params["owner"] and r["status"] in {"draft", "pending", "approved", "provisioning", "active"}]
+                active = [
+                    r
+                    for r in rows
+                    if r["owner_user_id"] == params["owner"]
+                    and r["status"] in {"draft", "pending", "approved", "provisioning", "active"}
+                ]
                 active.sort(key=lambda r: r["id"], reverse=True)
                 return FakeResult(type("Row", (), {"_mapping": active[0]})() if active else None)
-            if "SELECT id FROM bot_registrations WHERE tracking_code" in sql:
-                return FakeResult((rows[-1]["id"],))
             raise AssertionError(f"Unexpected SQL: {sql}")
 
         async def commit(self):
