@@ -50,6 +50,8 @@ class _Message:
         self._client = client
         self._data = data or {}
         self.id = self._data.get("message_id") or self._data.get("id")
+        # Ensure .data exists for all events (empty bytes for messages, callback data for callbacks)
+        self.data = b""
         # Ensure text and raw_text are always real strings, never objects
         self._text_value = self._data.get("text") or self._data.get("caption") or ""
         self.text = self._text_value
@@ -193,7 +195,17 @@ class TelegramClient:
         else:
             return
         for callback, builder in list(self._handlers):
-            if builder is not None and hasattr(builder, "matches") and not await builder.matches(event):
+            try:
+                if builder is not None and hasattr(builder, "matches"):
+                    if not await builder.matches(event):
+                        continue
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Handler filter failed for %s: %s; skipping handler and continuing to next",
+                    builder.__class__.__name__ if builder else "unknown",
+                    e,
+                )
                 continue
             result = callback(event)
             if inspect.isawaitable(result):
