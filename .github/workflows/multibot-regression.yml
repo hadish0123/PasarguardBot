@@ -8,6 +8,10 @@ on:
 jobs:
   regression:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: "123456:TEST_TOKEN_FOR_CI_ONLY"
+      ADMIN_ID: "1"
+      SQLALCHEMY_DATABASE_URL: "sqlite+aiosqlite:///./ci-test.db"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.0.1
