@@ -1,12 +1,7 @@
-"""PasarguardBot's Telegram Bot API compatibility runtime.
-
-This is intentionally not a package named ``telethon``. The real Telethon
-package remains available for utility/TL/error types, while this runtime keeps
-the application's HTTP Bot API client and event-filter semantics.
-"""
+"""PasarguardBot's Telegram Bot API compatibility runtime."""
 
 from . import events
-from .bot import TelegramClient, _Message
+from .bot import TelegramClient, _CallbackEvent, _Message
 from .button import Button
 
 _original_message_getattribute = _Message.__getattribute__
@@ -19,6 +14,8 @@ def _message_getattribute(self, name):
 
 
 _Message.__getattribute__ = _message_getattribute
+_Message.client = property(lambda self: self._client)
+_CallbackEvent.client = property(lambda self: self._client)
 
 
 def _is_connected(self):
