@@ -1,10 +1,35 @@
 """Telegram runtime for PasarguardBot.
 
-The project now uses Telegram's HTTP Bot API. BOT_TOKEN and ADMIN_ID are the
-only Telegram credentials required; API_ID/API_HASH and MTProto sessions are
-not used.
+The application runtime uses Telegram's HTTP Bot API. BOT_TOKEN and ADMIN_ID
+remain the only Telegram credentials required by the bot runtime; API_ID,
+API_HASH and MTProto sessions are not used by the application client.
+
+The real PyPI Telethon package is intentionally kept available for modules
+that import its utilities, TL types, errors, and request definitions. The
+small Bot API compatibility client/events/buttons live under
+``app.custom_telethon`` so they no longer shadow the real ``telethon`` package.
 """
-from telethon import TelegramClient
+
+import telethon as _telethon
+from app.custom_telethon import Button as BotAPIButton
+from app.custom_telethon import TelegramClient
+from app.custom_telethon import events as BotAPIEvents
+
+# Preserve the existing plugin surface that expects ``from telethon import
+# events, Button`` while keeping every other Telethon module backed by the
+# real PyPI package. This is an API-level compatibility bridge, not an import
+# shadowing package.
+_telethon.events = BotAPIEvents
+_telethon.Button = BotAPIButton
+try:
+    from telethon.tl import custom as _telethon_custom
+
+    _telethon_custom.Button = BotAPIButton
+except Exception:
+    # Import-time compatibility must not prevent the real Telethon package
+    # from being used for its normal modules.
+    pass
+
 from telethon.extensions import markdown
 from telethon.extensions.markdown import DEFAULT_DELIMITERS
 from telethon.tl.types import (
