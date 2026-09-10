@@ -44,6 +44,27 @@ async def test_context_does_not_leak_between_concurrent_tasks():
     assert get_current_tenant() is None
 
 
+@pytest.mark.asyncio
+async def test_global_kenzo_routes_api_calls_to_active_representative_client():
+    from app import Kenzo
+    from app.runtime.context import client_context
+
+    class FakeRepresentativeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def send_message(self, entity=None, message=None, **kwargs):
+            self.calls.append((entity, message, kwargs))
+            return "representative-message"
+
+    representative = FakeRepresentativeClient()
+    with client_context(representative):
+        result = await Kenzo.send_message(123, "سلام نماینده")
+
+    assert result == "representative-message"
+    assert representative.calls == [(123, "سلام نماینده", {})]
+
+
 def test_provisioner_contains_no_per_service_creation():
     source = (ROOT / "app/services/representative_provisioner.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
