@@ -1,32 +1,25 @@
 from __future__ import annotations
 
-import os
-
 from app.db.crud.panels import PanelsManager
 from app.utils.security.crypto import encrypt_data
 
 
-async def ensure_representative_panel() -> None:
-    if os.getenv("BOT_ROLE", "central").strip().lower() != "representative":
-        return
+async def ensure_representative_panel(registration: dict) -> None:
+    """Create/update only this representative's panel inside its tenant DB."""
+    panel_url = str(registration.get("panel_url") or "").strip()
+    api_key = str(registration.get("panel_api_key") or "").strip()
+    username = str(registration.get("panel_username") or "-").strip() or "-"
+    brand = str(registration.get("brand") or "Representative").strip() or "Representative"
+    registration_id = int(registration["id"])
+    if not panel_url or not api_key:
+        raise RuntimeError(f"Representative {registration_id} is missing panel credentials")
 
-    panel_url = os.getenv("REP_PANEL_URL", "").strip()
-    api_key = os.getenv("REP_PANEL_API_KEY", "").strip()
-    username = os.getenv("REP_PANEL_USERNAME", "-").strip() or "-"
-    brand = os.getenv("BOT_TAG", "Representative").strip() or "Representative"
-    registration_id = os.getenv("REPRESENTATIVE_ID", "").strip()
-
-    if not panel_url or not api_key or not registration_id:
-        raise RuntimeError("Representative panel configuration is incomplete")
-
-    code = int(registration_id)
     manager = PanelsManager()
-    panel = await manager.get_panel_by_code(code)
+    panel = await manager.get_panel_by_code(registration_id)
     encrypted_placeholder = encrypt_data(api_key)
-
     if panel:
         await manager.update_panel(
-            code,
+            registration_id,
             name=brand,
             enable=True,
             base_url=panel_url,
@@ -38,7 +31,7 @@ async def ensure_representative_panel() -> None:
         return
 
     await manager.add_panel(
-        code=code,
+        code=registration_id,
         name=brand,
         enable=True,
         base_url=panel_url,
