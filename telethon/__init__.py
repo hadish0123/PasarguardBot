@@ -25,4 +25,16 @@ async def _disconnected(self):
 TelegramClient.is_connected = _is_connected
 TelegramClient.disconnected = property(lambda self: _disconnected(self))
 
+_original_send_message = TelegramClient.send_message
+async def _send_message(self, entity=None, message=None, **kwargs):
+    kwargs.setdefault("parse_mode", "Markdown")
+    return await _original_send_message(self, entity=entity, message=message, **kwargs)
+TelegramClient.send_message = _send_message
+
+_original_edit_message = TelegramClient.edit_message
+async def _edit_message(self, entity, message, text=None, **kwargs):
+    kwargs.setdefault("parse_mode", "Markdown")
+    return await _original_edit_message(self, entity, message, text, **kwargs)
+TelegramClient.edit_message = _edit_message
+
 __all__ = ["TelegramClient", "events", "Button"]
