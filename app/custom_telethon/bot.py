@@ -34,15 +34,11 @@ def _button_markup(buttons):
                 out.append(b.to_dict())
         if out:
             rows.append(out)
-    if rows and all("callback_data" in b or "url" in b for r in rows for b in r):
-        return {"inline_keyboard": rows}
-    return {"keyboard": rows, "resize_keyboard": True}
+    return {"inline_keyboard": rows} if rows and all("callback_data" in b or "url" in b for r in rows for b in r) else {"keyboard": rows, "resize_keyboard": True}
 
 
 def _chat_id(value):
-    if hasattr(value, "id"):
-        return value.id
-    return value
+    return value.id if hasattr(value, "id") else value
 
 
 class _Message:
@@ -51,9 +47,8 @@ class _Message:
         self._data = data or {}
         self.id = self._data.get("message_id") or self._data.get("id")
         self.data = b""
-        self._text_value = self._data.get("text") or self._data.get("caption") or ""
-        self.text = self._text_value
-        self.raw_text = self._text_value
+        self.text = self._data.get("text") or self._data.get("caption") or ""
+        self.raw_text = self.text
         self.message = self
         self.chat_id = chat_id if chat_id is not None else (self._data.get("chat", {}) or {}).get("id")
         self.sender_id = (self._data.get("from", {}) or {}).get("id")
@@ -61,9 +56,10 @@ class _Message:
         self.entities = self._data.get("entities", [])
         self.media = self._data.get("photo") or self._data.get("document") or self._data.get("video")
         self.file = self.media
-        self.is_private = bool(self._data.get("chat", {}).get("type") == "private")
-        self.is_channel = bool(self._data.get("chat", {}).get("type") == "channel")
-        self.is_group = bool(self._data.get("chat", {}).get("type") in {"group", "supergroup"})
+        chat_type = (self._data.get("chat", {}) or {}).get("type")
+        self.is_private = chat_type == "private"
+        self.is_channel = chat_type == "channel"
+        self.is_group = chat_type in {"group", "supergroup"}
         self.incoming = True
         self.out = False
 
@@ -86,9 +82,7 @@ class _Message:
 
     async def get_reply_message(self):
         reply_id = (self._data.get("reply_to_message") or {}).get("message_id")
-        if not reply_id:
-            return None
-        return await self._client.get_messages(self.chat_id, ids=reply_id)
+        return await self._client.get_messages(self.chat_id, ids=reply_id) if reply_id else None
 
     async def download_media(self, file=None, **kwargs):
         return await self._client.download_media(self, file=file, **kwargs)
@@ -97,12 +91,10 @@ class _Message:
 class _CallbackEvent:
     def __init__(self, client, update):
         self._client = client
-        self._update = update
         self._query = update.get("callback_query", {})
         self.id = self._query.get("id")
         self.data = (self._query.get("data") or "").encode()
-        self.text = ""
-        self.raw_text = ""
+        self.text = self.raw_text = ""
         self.sender_id = (self._query.get("from") or {}).get("id")
         self.chat_id = ((self._query.get("message") or {}).get("chat") or {}).get("id")
         self.message = _Message(client, self._query.get("message") or {}, self.chat_id) if self._query.get("message") else None
@@ -116,13 +108,10 @@ class _CallbackEvent:
         return await self._client._api("answerCallbackQuery", callback_query_id=self.id, text=message or "", show_alert=alert)
 
     async def edit(self, text=None, **kwargs):
-        if not self.message:
-            return None
-        return await self._client.edit_message(self.chat_id, self.message.id, text or "", **kwargs)
+        return await self._client.edit_message(self.chat_id, self.message.id, text or "", **kwargs) if self.message else None
 
     async def delete(self):
-        if self.message:
-            return await self._client.delete_messages(self.chat_id, [self.message.id])
+        return await self._client.delete_messages(self.chat_id, [self.message.id]) if self.message else None
 
     async def get_message(self):
         return self.message
@@ -155,6 +144,16 @@ class TelegramClient:
     def set_runtime_context_factory(self, factory) -> None:
         self._runtime_context_factory = factory
 
+    def is_connected(self) -> bool:
+        return bool(self._session and not self._session.closed and not self._stop.is_set())
+
+    @property
+    def disconnected(self):
+        return self._wait_disconnected()
+
+    async def _wait_disconnected(self):
+        await self._stop.wait()
+
     async def start(self, *args, bot_token=None, **kwargs):
         self._token = bot_token or os.getenv("BOT_TOKEN")
         if not self._token:
@@ -174,12 +173,7 @@ class TelegramClient:
     async def run_until_disconnected(self):
         while not self._stop.is_set():
             try:
-                updates = await self._api(
-                    "getUpdates",
-                    offset=self._offset,
-                    timeout=30,
-                    allowed_updates=["message", "callback_query", "edited_message", "chat_member", "my_chat_member"],
-                )
+                updates = await self._api("getUpdates", offset=self._offset, timeout=30, allowed_updates=["message", "callback_query", "edited_message", "chat_member", "my_chat_member"])
                 for update in updates or []:
                     self._offset = int(update.get("update_id", 0)) + 1
                     try:
@@ -197,12 +191,10 @@ class TelegramClient:
     async def _dispatch(self, update):
         if self._runtime_context_factory is not None:
             from app.runtime.context import tenant_context
-
             tenant = self._runtime_context_factory()
-            if tenant is None:
-                return await self._dispatch_inner(update)
-            with tenant_context(tenant):
-                return await self._dispatch_inner(update)
+            if tenant is not None:
+                with tenant_context(tenant):
+                    return await self._dispatch_inner(update)
         return await self._dispatch_inner(update)
 
     async def _dispatch_inner(self, update):
@@ -213,18 +205,14 @@ class TelegramClient:
             event.original_update = SimpleNamespace(msg_id=event.id)
         else:
             return
-        for callback, builder in list(self._handlers):
+        handlers = sorted(self._handlers, key=lambda item: getattr(item[0], "_handler_priority", 0))
+        for callback, builder in handlers:
             try:
-                if builder is not None and hasattr(builder, "matches"):
-                    if not await builder.matches(event):
-                        continue
-            except Exception as e:
+                if builder is not None and hasattr(builder, "matches") and not await builder.matches(event):
+                    continue
+            except Exception as exc:
                 import logging
-                logging.getLogger(__name__).warning(
-                    "Handler filter failed for %s: %s; skipping handler and continuing",
-                    builder.__class__.__name__ if builder else "unknown",
-                    e,
-                )
+                logging.getLogger(__name__).warning("Handler filter failed for %s: %s", builder.__class__.__name__ if builder else "unknown", exc)
                 continue
             result = callback(event)
             if inspect.isawaitable(result):
@@ -278,8 +266,7 @@ class TelegramClient:
 
     async def send_file(self, entity, file, caption=None, **kwargs):
         path = Path(file) if isinstance(file, (str, os.PathLike)) else None
-        method = "sendDocument"
-        field = "document"
+        method, field = "sendDocument", "document"
         if path and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
             method, field = "sendPhoto", "photo"
         data = aiohttp.FormData()
@@ -299,9 +286,6 @@ class TelegramClient:
         return _Message(self, payload.get("result", {}), _chat_id(entity))
 
     async def download_media(self, message, file=None, **kwargs):
-        media = getattr(message, "media", None)
-        if not media:
-            return None
         return None
 
     async def get_entity(self, entity):
@@ -315,12 +299,7 @@ class TelegramClient:
         return await self._api("forwardMessages", chat_id=_chat_id(entity), from_chat_id=_chat_id(from_peer), message_ids=mids)
 
     async def pin_message(self, entity, message, **kwargs):
-        return await self._api(
-            "pinChatMessage",
-            chat_id=_chat_id(entity),
-            message_id=getattr(message, "id", message),
-            disable_notification=kwargs.get("notify", True) is False,
-        )
+        return await self._api("pinChatMessage", chat_id=_chat_id(entity), message_id=getattr(message, "id", message), disable_notification=kwargs.get("notify", True) is False)
 
     async def unpin_message(self, entity, message=None, **kwargs):
         params = {"chat_id": _chat_id(entity)}
