@@ -50,9 +50,12 @@ class _Message:
         self._client = client
         self._data = data or {}
         self.id = self._data.get("message_id") or self._data.get("id")
-        self.message = self._data.get("text") or self._data.get("caption") or ""
-        self.text = self.message
-        self.raw_text = self.message
+        # Ensure text and raw_text are always real strings, never objects
+        self._text_value = self._data.get("text") or self._data.get("caption") or ""
+        self.text = self._text_value
+        self.raw_text = self._text_value
+        # Keep .message as self for compatibility (event.message.text should work)
+        self.message = self
         self.chat_id = chat_id if chat_id is not None else (self._data.get("chat", {}) or {}).get("id")
         self.sender_id = (self._data.get("from", {}) or {}).get("id")
         self.date = self._data.get("date")
