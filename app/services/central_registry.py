@@ -37,7 +37,6 @@ def _row(row) -> dict:
 async def ensure_registry() -> None:
     async with AsyncSessionLocal() as session:
         await session.execute(text(CREATE_TABLE_SQL))
-        # Safe upgrades for databases created by the first development revision.
         columns = {
             row[0]
             for row in (await session.execute(text("SHOW COLUMNS FROM bot_registrations"))).all()
@@ -67,7 +66,7 @@ async def get_active_for_owner(owner_user_id: int):
 
 async def create_draft(owner_user_id: int, tracking_code: str):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
+        await session.execute(
             text(
                 "INSERT INTO bot_registrations "
                 "(tracking_code, owner_user_id, brand, bot_id, bot_token, panel_url, panel_username, panel_api_key, status, step) "
@@ -76,7 +75,14 @@ async def create_draft(owner_user_id: int, tracking_code: str):
             {"tracking": tracking_code, "owner": owner_user_id},
         )
         await session.commit()
-        return int(result.lastrowid)
+        result = await session.execute(
+            text("SELECT id FROM bot_registrations WHERE tracking_code=:tracking LIMIT 1"),
+            {"tracking": tracking_code},
+        )
+        row = result.first()
+        if not row:
+            raise RuntimeError("Could not create registration record")
+        return int(row[0])
 
 
 async def get_by_id(registration_id: int):
@@ -90,20 +96,9 @@ async def get_by_id(registration_id: int):
 
 async def update_registration(registration_id: int, **values) -> None:
     allowed = {
-        "brand",
-        "bot_id",
-        "bot_username",
-        "bot_token",
-        "panel_url",
-        "panel_username",
-        "panel_api_key",
-        "status",
-        "step",
-        "rejection_reason",
-        "tenant_db_name",
-        "railway_service_id",
-        "railway_environment_id",
-        "approved_at",
+        "brand", "bot_id", "bot_username", "bot_token", "panel_url", "panel_username", "panel_api_key",
+        "status", "step", "rejection_reason", "tenant_db_name", "railway_service_id",
+        "railway_environment_id", "approved_at",
     }
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
@@ -115,17 +110,13 @@ async def update_registration(registration_id: int, **values) -> None:
         params[key] = value
     assignments.append("updated_at=CURRENT_TIMESTAMP")
     async with AsyncSessionLocal() as session:
-        await session.execute(
-            text(f"UPDATE bot_registrations SET {', '.join(assignments)} WHERE id=:id"), params
-        )
+        await session.execute(text(f"UPDATE bot_registrations SET {', '.join(assignments)} WHERE id=:id"), params)
         await session.commit()
 
 
 async def get_approved():
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            text("SELECT * FROM bot_registrations WHERE status='approved' ORDER BY id ASC")
-        )
+        result = await session.execute(text("SELECT * FROM bot_registrations WHERE status='approved' ORDER BY id ASC"))
         return [_row(row) for row in result.fetchall()]
 
 
