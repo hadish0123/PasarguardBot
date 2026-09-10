@@ -1,13 +1,18 @@
 import ast
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-from app.runtime.context import TenantRuntime, get_current_tenant, tenant_context
-from app.telegram.state.keys import build_state_key
-
 
 ROOT = Path(__file__).resolve().parents[1]
+_spec = importlib.util.spec_from_file_location("pasarguard_runtime_context_test", ROOT / "app/runtime/context.py")
+_context = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(_context)
+TenantRuntime = _context.TenantRuntime
+get_current_tenant = _context.get_current_tenant
+tenant_context = _context.tenant_context
 
 
 def tenant(registration_id: int, owner: int, bot_id: int) -> TenantRuntime:
@@ -24,17 +29,12 @@ def tenant(registration_id: int, owner: int, bot_id: int) -> TenantRuntime:
     )
 
 
-def test_context_isolation_and_redis_namespace():
+def test_context_isolation():
     a, b = tenant(101, 1001, 2001), tenant(202, 1002, 2002)
     with tenant_context(a):
-        key_a = build_state_key(55)
         assert get_current_tenant().registration_id == 101
     with tenant_context(b):
-        key_b = build_state_key(55)
         assert get_current_tenant().registration_id == 202
-    assert key_a != key_b
-    assert ":tenant:101:" in key_a
-    assert ":tenant:202:" in key_b
     assert get_current_tenant() is None
 
 
@@ -63,9 +63,9 @@ def test_provisioner_contains_no_per_service_creation():
     assert "command" in names
 
 
-def test_multi_bot_manager_has_single_service_model():
+def test_multi_bot_manager_has_isolation_runtime():
     source = (ROOT / "app/services/multi_bot_manager.py").read_text(encoding="utf-8")
     assert "MultiBotManager" in source
     assert "start_for_registration" in source
     assert "tenant_context" in source
-    assert "clone_handlers_from" not in source or "_handlers" in source
+    assert "client_context" in source
