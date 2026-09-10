@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from app import Kenzo
 from app.custom_telethon import TelegramClient
 from app.logger.telethon import register_telethon_client, unregister_telethon_client
+from app.runtime.context import TenantRuntime, client_context, tenant_context
 from app.services.central_registry import get_approved, get_by_id, reveal, update_registration
 from app.services.representative_bootstrap import ensure_representative_panel
 from app.services.representative_provisioner import provision_representative, tenant_database_url
-from app.runtime.context import TenantRuntime, tenant_context
 
 
 @dataclass
@@ -33,11 +32,7 @@ class MultiBotManager:
         return self._locks.setdefault(registration_id, asyncio.Lock())
 
     def _handler_copy(self):
-        # Central registration handlers must never execute on representative bots.
-        return [
-            item for item in self.central_client._handlers
-            if not getattr(item[0], "__module__", "").endswith("central_registration")
-        ]
+        return [item for item in self.central_client._handlers if not getattr(item[0], "__module__", "").endswith("central_registration")]
 
     async def _build_tenant(self, registration: dict) -> TenantRuntime:
         database = registration.get("tenant_db_name") or f"primevpn_rep_{int(registration['id'])}"
@@ -58,50 +53,43 @@ class MultiBotManager:
             existing = self._runtimes.get(registration_id)
             if existing and existing.client.is_connected():
                 return existing
-
             registration = await get_by_id(registration_id)
             if not registration:
                 raise RuntimeError("Registration not found")
             if registration["status"] not in {"approved", "provisioning", "active"}:
                 raise RuntimeError(f"Registration {registration_id} is not approved")
-
             if provision or not registration.get("tenant_db_name"):
                 result = await provision_representative(registration_id)
                 await update_registration(registration_id, **result)
                 registration = await get_by_id(registration_id)
-
             tenant = await self._build_tenant(registration)
             client = TelegramClient()
             client._handlers = self._handler_copy()
             client.set_runtime_context_factory(lambda tenant=tenant: tenant)
-
             try:
                 await client.start(bot_token=reveal(registration["bot_token"]))
                 me = await client.get_me()
                 if int(me.id) != tenant.bot_id:
                     raise RuntimeError(f"Telegram bot id mismatch: expected {tenant.bot_id}, got {me.id}")
-
-                # All DB and Redis operations below are automatically isolated to
-                # this registration's tenant context.
                 with tenant_context(tenant):
                     await ensure_representative_panel(registration)
-
                 runtime = RepresentativeRuntime(registration_id, tenant, client)
                 register_telethon_client(client)
                 runtime.task = asyncio.create_task(self._run(runtime), name=f"representative-bot-{registration_id}")
                 self._runtimes[registration_id] = runtime
                 await update_registration(registration_id, status="active", step="active", rejection_reason=None)
                 return runtime
-            except Exception:
+            except Exception as exc:
                 await client.disconnect()
-                await update_registration(registration_id, status="pending", step="awaiting_admin", rejection_reason="bot activation failed")
+                await update_registration(registration_id, status="pending", step="awaiting_admin", rejection_reason=str(exc))
                 raise
 
     async def _run(self, runtime: RepresentativeRuntime) -> None:
         backoff = 2
         while not self._stopping:
             try:
-                await runtime.client.run_until_disconnected()
+                with client_context(runtime.client), tenant_context(runtime.tenant):
+                    await runtime.client.run_until_disconnected()
                 if self._stopping:
                     break
                 await asyncio.sleep(backoff)
@@ -114,12 +102,10 @@ class MultiBotManager:
 
     async def start_all(self) -> None:
         self._stopping = False
-        registrations = await get_approved()
-        for registration in registrations:
+        for registration in await get_approved():
             try:
                 await self.start_for_registration(int(registration["id"]), provision=not bool(registration.get("tenant_db_name")))
             except Exception:
-                # One broken representative must never prevent other bots from starting.
                 continue
 
     async def stop_for_registration(self, registration_id: int) -> None:
@@ -135,8 +121,7 @@ class MultiBotManager:
 
     async def stop_all(self) -> None:
         self._stopping = True
-        ids = list(self._runtimes)
-        await asyncio.gather(*(self.stop_for_registration(rid) for rid in ids), return_exceptions=True)
+        await asyncio.gather(*(self.stop_for_registration(rid) for rid in list(self._runtimes)), return_exceptions=True)
 
     def get_runtime(self, registration_id: int) -> RepresentativeRuntime | None:
         return self._runtimes.get(registration_id)
