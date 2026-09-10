@@ -54,6 +54,46 @@ DEFAULT_DELIMITERS["^qc^"] = lambda *a, **k: MessageEntityBlockquote(*a, **k, co
 DEFAULT_DELIMITERS["^sp^"] = lambda *a, **k: MessageEntitySpoiler(*a, **k)
 
 
+class RuntimeAwareTelegramClient(TelegramClient):
+    """Route legacy global ``Kenzo`` API calls to the active tenant client.
+
+    Most existing plugins import ``Kenzo`` directly at module import time.
+    Representative runtimes reuse those handlers, so a direct ``Kenzo`` call
+    would otherwise send through the central bot token. During a representative
+    update the manager installs the current client in a context variable; this
+    facade transparently routes Telegram API calls to that client while keeping
+    central-bot behavior unchanged outside a representative runtime.
+    """
+
+    _ROUTED_METHODS = frozenset(
+        {
+            "send_message",
+            "edit_message",
+            "delete_messages",
+            "get_messages",
+            "iter_messages",
+            "send_file",
+            "download_media",
+            "get_entity",
+            "get_participants",
+            "forward_messages",
+            "pin_message",
+            "unpin_message",
+            "send_read_acknowledge",
+            "get_me",
+        }
+    )
+
+    def __getattribute__(self, name):
+        if name in RuntimeAwareTelegramClient._ROUTED_METHODS:
+            from app.runtime.context import get_current_client
+
+            current = get_current_client()
+            if current is not None and current is not self:
+                return getattr(current, name)
+        return super().__getattribute__(name)
+
+
 class CustomMarkdown:
     """Legacy parser surface retained for modules that import it."""
 
@@ -66,5 +106,5 @@ class CustomMarkdown:
         return markdown.unparse(text, entities)
 
 
-Kenzo = TelegramClient()
+Kenzo = RuntimeAwareTelegramClient()
 Kenzo.parse_mode = "Markdown"
