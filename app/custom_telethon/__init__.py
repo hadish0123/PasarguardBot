@@ -1,12 +1,12 @@
 """PasarguardBot's Telegram Bot API compatibility runtime.
 
-This is intentionally not a package named ``telethon``.  The real Telethon
-package remains available for modules that need its utility/TL/error surface,
-while this small runtime keeps the application's HTTP Bot API client and
-legacy event-filter semantics without API_ID/API_HASH/session credentials.
+This is intentionally not a package named ``telethon``. The real Telethon
+package remains available for utility/TL/error types, while this runtime keeps
+the application's HTTP Bot API client and event-filter semantics.
 """
-from .bot import TelegramClient, _Message
+
 from . import events
+from .bot import TelegramClient, _Message
 from .button import Button
 
 _original_message_getattribute = _Message.__getattribute__
@@ -36,6 +36,11 @@ _original_send_message = TelegramClient.send_message
 
 
 async def _send_message(self, entity=None, message=None, **kwargs):
+    from app.runtime.context import get_current_client
+
+    active = get_current_client()
+    if active is not None and active is not self:
+        return await active.send_message(entity=entity, message=message, **kwargs)
     kwargs.setdefault("parse_mode", "Markdown")
     return await _original_send_message(self, entity=entity, message=message, **kwargs)
 
@@ -46,10 +51,15 @@ _original_edit_message = TelegramClient.edit_message
 
 
 async def _edit_message(self, entity, message, text=None, **kwargs):
+    from app.runtime.context import get_current_client
+
+    active = get_current_client()
+    if active is not None and active is not self:
+        return await active.edit_message(entity, message, text, **kwargs)
     kwargs.setdefault("parse_mode", "Markdown")
     return await _original_edit_message(self, entity, message, text, **kwargs)
 
 
 TelegramClient.edit_message = _edit_message
 
-__all__ = ["TelegramClient", "events", "Button"]
+__all__ = ["Button", "TelegramClient", "events"]
