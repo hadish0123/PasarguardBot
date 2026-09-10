@@ -8,6 +8,7 @@ from telethon import Button, events
 from telethon.tl.custom import Message
 
 from app import Kenzo
+from app.utils.text.markdown import escape
 from app.logger import get_logger
 from app.services.central_registry import (
     create_draft,
@@ -69,7 +70,7 @@ async def _notify_admins(text: str, buttons=None) -> None:
 @Kenzo.on(events.NewMessage(pattern=r"^/start$"))
 async def central_start(event: Message) -> None:
     await event.respond(
-        f"🌐 **{BRAND}**\n\nبه سامانه مرکزی نمایندگان خوش آمدید.\nاز اینجا می‌توانید ربات فروش خودتان را ثبت و پس از تأیید فعال کنید.",
+        f"🌐 **{BRAND}**\n\nبه سامانه مرکزی نمایندگان خوش آمدید.\nاز اینجا می‌توانید ربات فروش خودتان را ثبت و پس از تأی[...]
         buttons=_main_menu(),
     )
 
@@ -122,7 +123,7 @@ async def registration_messages(event: Message) -> None:
             return
         await update_registration(rid, brand=value, step="bot_token")
         await event.respond(
-            "2️⃣ **اطلاعات ربات**\n\nتوکن رباتی که از BotFather گرفته‌اید را ارسال کنید.\nسپس شناسه عددی ربات هم از شما دریافت می‌شود."
+            "2️⃣ **اطلاعات ربات**\n\nتوکن رباتی که از BotFather گرفته‌اید را ارسال کنید.\nسپس شناسه عددی ربات هم از شما د[...]
         )
         return
 
@@ -140,7 +141,7 @@ async def registration_messages(event: Message) -> None:
             step="bot_id",
         )
         await event.respond(
-            f"✅ توکن صحیح است و ربات **@{me.get('username') or 'بدون‌نام'}** شناسایی شد.\n\nحالا **شناسه عددی ربات** را ارسال کنید."
+            f"✅ توکن صحیح است و ربات **@{me.get('username') or 'بدون‌نام'}** شناسایی شد.\n\nحالا **شناسه عددی ربات** را ارسال کنید.[...]
         )
         return
 
@@ -192,17 +193,17 @@ async def registration_messages(event: Message) -> None:
         )
         current = await get_by_id(rid)
         await event.respond(
-            f"✅ پنل پاسارگارد با موفقیت تأیید شد.\n\n🎫 کد پیگیری: `{current['tracking_code']}`\n\nدرخواست شما برای مدیریت مرکزی ارسال شد. پس از تأیید، ربات نمایندگی با برند شما فعال می‌شود."
+            f"✅ پنل پاسارگارد با موفقیت تأیید شد.\n\n🎫 کد پیگیری: `{current['tracking_code']}`\n\nدرخواست شما برای مدیریت مرکزی ا[...]
         )
         admin_text = (
             "🆕 **درخواست نمایندگی جدید**\n\n"
             f"🎫 کد: `{current['tracking_code']}`\n"
             f"👤 کاربر: `{current['owner_user_id']}`\n"
-            f"🏷 برند: **{current['brand']}**\n"
-            f"🤖 ربات: @{current['bot_username'] or 'unknown'}\n"
+            f"🏷 برند: **{escape(current['brand'])}**\n"
+            f"🤖 ربات: @{escape(current['bot_username'] or 'unknown')}\n"
             f"🆔 Bot ID: `{current['bot_id']}`\n"
             f"🌐 پنل: `{current['panel_url']}`\n"
-            f"👤 نام کاربری پنل: `{current['panel_username']}`\n\n"
+            f"👤 نام کاربری پنل: `{escape(current['panel_username'])}`\n"
             "API Key به‌صورت رمزنگاری‌شده ذخیره شده است."
         )
         await _notify_admins(admin_text, buttons=_admin_buttons(rid))
@@ -221,7 +222,7 @@ async def approve_registration(event) -> None:
         return
     await update_registration(rid, status="approved", step="provisioning")
     await event.answer("درخواست تأیید شد؛ فعال‌سازی در حال انجام است.")
-    await event.edit(event.message.text + "\n\n⏳ **تأیید شد؛ فعال‌سازی ربات در حال انجام است...**")
+    await event.edit(escape(event.message.text) + "\n\n⏳ **تأیید شد؛ فعال‌سازی ربات در حال انجام است...**", parse_mode=None)
     from app.services.representative_provisioner import provision_representative
 
     try:
@@ -229,13 +230,13 @@ async def approve_registration(event) -> None:
         await update_registration(rid, status="approved", step="active", **result)
         await Kenzo.send_message(
             registration["owner_user_id"],
-            f"🎉 **نمایندگی شما فعال شد!**\n\n🏷 برند: **{registration['brand']}**\n🎫 کد پیگیری: `{registration['tracking_code']}`\n\n🤖 ربات نمایندگی شما آماده استفاده است."
+            f"🎉 **نمایندگی شما فعال شد!**\n\n🏷 برند: **{registration['brand']}**\n🎫 کد پیگیری: `{registration['tracking_code']}`\n\n🤖 ربات نماین[...]
         )
-        await event.edit(event.message.text + "\n\n✅ **فعال‌سازی کامل شد.**")
+        await event.edit(escape(event.message.text) + "\n\n✅ **فعال‌سازی کامل شد.**", parse_mode=None)
     except Exception as exc:
         logger.exception("Representative provisioning failed: %s", exc)
         await update_registration(rid, status="pending", step="awaiting_admin", rejection_reason=str(exc))
-        await event.edit(event.message.text + f"\n\n⚠️ **فعال‌سازی ناموفق:** `{exc}`")
+        await event.edit(escape(event.message.text) + f"\n\n⚠️ **فعال‌سازی ناموفق:** `{escape(str(exc))}`", parse_mode=None)
 
 
 @Kenzo.on(events.CallbackQuery(data=re.compile(rb"^prime:reject:\d+$")))
@@ -250,7 +251,7 @@ async def reject_registration(event) -> None:
         return
     await update_registration(rid, status="rejected", step="brand", rejection_reason="توسط مدیریت مرکزی رد شد")
     await event.answer("رد شد")
-    await event.edit(event.message.text + "\n\n❌ **درخواست رد شد.**")
+    await event.edit(escape(event.message.text) + "\n\n❌ **درخواست رد شد.**", parse_mode=None)
     await Kenzo.send_message(
         registration["owner_user_id"],
         f"❌ درخواست نمایندگی شما رد شد.\n\nکد پیگیری: `{registration['tracking_code']}`\nدوباره از منوی ثبت ربات اقدام کنید."
