@@ -87,15 +87,6 @@ async def test_multiple_registrations_are_allowed_after_activation(monkeypatch):
                 rid = len(rows) + 1
                 rows.append({"id": rid, "owner_user_id": params["owner"], "status": "draft"})
                 return FakeResult()
-            if "SELECT * FROM bot_registrations WHERE owner_user_id" in sql:
-                active = [
-                    r
-                    for r in rows
-                    if r["owner_user_id"] == params["owner"]
-                    and r["status"] in {"draft", "pending", "approved", "provisioning", "active"}
-                ]
-                active.sort(key=lambda r: r["id"], reverse=True)
-                return FakeResult(type("Row", (), {"_mapping": active[0]})() if active else None)
             raise AssertionError(f"Unexpected SQL: {sql}")
 
         async def commit(self):
@@ -111,6 +102,9 @@ async def test_multiple_registrations_are_allowed_after_activation(monkeypatch):
 
     rows.append({"id": 1, "owner_user_id": 101, "status": "active"})
     first = await registry.create_draft(101, "PRIME-ONE")
+    # The first registration has completed activation; only unfinished
+    # registrations should block creation of the next one.
+    rows[-1]["status"] = "active"
     second = await registry.create_draft(101, "PRIME-TWO")
 
     assert first == 2
