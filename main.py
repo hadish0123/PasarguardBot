@@ -56,16 +56,13 @@ async def main():
 
     from app.db.crud.secrets import ensure_secrets
     from app.services.central_registry import ensure_registry
-    from app.services.representative_bootstrap import ensure_representative_panel
 
     await ensure_secrets()
     await ensure_registry()
-    await ensure_representative_panel()
-    logger.info("%s Secrets, registry, and representative bootstrap ready", LogTag.BOOT)
+    logger.info("%s Secrets and central registry ready", LogTag.BOOT)
 
     api_task = None
     server = None
-
     if ENABLE_FASTAPI:
         from app.routers import api_app as fastapi_app
         config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=FAST_API_PORT, log_level="info")
@@ -76,14 +73,13 @@ async def main():
         logger.info("%s FastAPI disabled (FASTAPI_PORT not configured)", LogTag.API)
 
     bot_task = asyncio.create_task(run_telethon(stop_event=stop_event))
-    logger.info("%s Starting Telegram bot", LogTag.BOOT)
+    logger.info("%s Starting Telegram bot and representative runtimes", LogTag.BOOT)
 
     await stop_event.wait()
 
     if scheduler.running:
         scheduler.shutdown(wait=False)
         logger.info("%s Scheduler shut down", LogTag.BOOT)
-
     if server:
         server.should_exit = True
 
@@ -95,7 +91,6 @@ async def main():
     tasks_to_gather = [bot_task]
     if api_task:
         tasks_to_gather.append(api_task)
-
     await asyncio.gather(*tasks_to_gather, return_exceptions=True)
     logger.info("%s Shutdown complete", LogTag.BOOT)
 
