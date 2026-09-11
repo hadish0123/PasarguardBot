@@ -10,7 +10,7 @@ def register(client,tenant_id=None):
  async def callback(event):
   async with tenant_dispatch(tenant_id):
    if not await allowed(event):return await event.answer("دسترسی به این بخش ندارید.",alert=True)
-   await render_callback(event)
+   await event.answer(); await render_callback(event)
  async def message(event):
   async with tenant_dispatch(tenant_id):await handle_message(event)
  client.add_event_handler(callback,events.CallbackQuery(func=lambda e:bool(e.data and e.data.startswith(PREFIX))))
@@ -27,10 +27,10 @@ async def render_profile(uid:int):
 async def render_callback(event):
  action=event.data[len(PREFIX):].decode(errors="ignore")
  if action in ("","show"):
-  t,b=await render_profile(event.sender_id);await event.edit(t,buttons=b);return await event.answer()
+  t,b=await render_profile(event.sender_id);await event.edit(t,buttons=b);return
  if action=="edit_name":
   state=getattr(event.client,"_profile_edit_users",set());event.client._profile_edit_users=state;state.add(event.sender_id)
-  await event.edit("✏️ **ویرایش نام**\n\nنام جدید را ارسال کنید:\n`نام` یا `نام|نام خانوادگی`\n\nبرای لغو `/cancel` را بفرستید.",buttons=[[Button.inline("🔙 انصراف",PREFIX+b"show")]]);return await event.answer()
+  await event.edit("✏️ **ویرایش نام**\n\nنام جدید را ارسال کنید:\n`نام` یا `نام|نام خانوادگی`\n\nبرای لغو `/cancel` را بفرستید.",buttons=[[Button.inline("🔙 انصراف",PREFIX+b"show")]]);return
  await event.answer("گزینه نامعتبر است.",alert=True)
 async def handle_message(event):
  if not event.is_private or not get_tenant():return
