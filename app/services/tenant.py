@@ -81,11 +81,12 @@ class TenantService:
             record = await session.scalar(select(TenantRecord).where(TenantRecord.registration_id == registration_id))
             return self._to_domain(record) if record else None
 
-    async def list_runtime_tenants(self) -> list[RuntimeTenant]:
-        """Return only active tenants with decryptable bot credentials for restart recovery."""
+    async def list_runtime_tenants(self, excluded_bot_token: str | None = None) -> list[RuntimeTenant]:
+        """Return active tenant runtimes, excluding the central bot token."""
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         box = get_secret_box()
+        excluded = (excluded_bot_token or "").strip()
         async with SessionFactory() as session:
             rows = list((await session.execute(
                 select(TenantRecord).where(TenantRecord.status == TenantStatus.ACTIVE.value)
@@ -95,11 +96,12 @@ class TenantService:
             if not record.bot_token_encrypted:
                 continue
             try:
-                token = box.decrypt(record.bot_token_encrypted)
+                token = box.decrypt(record.bot_token_encrypted).strip()
             except Exception:
                 continue
-            if token:
-                tenants.append(RuntimeTenant(record.id, token))
+            if not token or (excluded and token == excluded):
+                continue
+            tenants.append(RuntimeTenant(record.id, token))
         return tenants
 
     async def set_status(self, tenant_id: str, status: TenantStatus) -> Tenant:
