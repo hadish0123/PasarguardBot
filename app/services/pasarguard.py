@@ -88,7 +88,7 @@ class PasarguardClient:
             return len(data)
         raise ExternalServiceError("ساختار پاسخ تعداد کلاینت‌های پاسارگارد نامعتبر است.")
 
-    async def _group_id_by_name(self, group_name: str) -> int | None:
+    async def _first_group_id(self) -> int | None:
         response = await self._request("GET", "/api/groups/simple", params={"limit": 100})
         if response.status_code == 404:
             return None
@@ -99,22 +99,27 @@ class PasarguardClient:
             data = response.json()
         except ValueError as exc:
             raise ExternalServiceError("پاسخ گروه‌های پاسارگارد JSON معتبر نیست.") from exc
-        items = data if isinstance(data, list) else data.get("items", []) if isinstance(data, dict) else []
-        wanted = group_name.strip().casefold()
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("items") or data.get("groups") or []
+        else:
+            items = []
         for item in items:
             if not isinstance(item, dict):
                 continue
-            item_name = str(item.get("name") or "").strip()
+            if item.get("is_disabled") is True or item.get("disabled") is True:
+                continue
             item_id = item.get("id")
-            if item_name.casefold() == wanted and isinstance(item_id, int) and item_id > 0:
+            if isinstance(item_id, int) and item_id > 0:
                 return item_id
         return None
 
     async def create_test_user(self) -> ProvisionedUser:
         username = f"pasarguard_test_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-        group_id = await self._group_id_by_name("AII")
+        group_id = await self._first_group_id()
         if group_id is None:
-            raise ExternalServiceError("گروه AII در پنل پاسارگارد پیدا نشد؛ کلاینت تستی ساخته نشد تا بدون گروه و کانفیگ ایجاد نشود.")
+            raise ExternalServiceError("هیچ گروه فعالی در پنل پاسارگارد پیدا نشد؛ کلاینت تستی بدون گروه ساخته نمی‌شود.")
         response = await self._request("POST", "/api/user", json={"username": username, "group_ids": [group_id]})
         if not response.is_success:
             detail = response.text.strip()[:500]
