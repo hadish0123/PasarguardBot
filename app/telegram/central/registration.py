@@ -61,7 +61,6 @@ async def input_router(event):
         return
     if event.raw_text.strip().lower() in {"/cancel", "cancel", "لغو"}:
         return
-
     record = await STORE.latest_for_owner(event.sender_id)
     if record is None or record.status != RegistrationStatus.DRAFT.value:
         return
@@ -72,13 +71,15 @@ async def input_router(event):
     except ValidationError as exc:
         await event.respond(f"❌ {exc}\n\n{PROMPTS[step]}", buttons=wizard_buttons())
         return
-    except Exception:
-        await event.respond("❌ پردازش اطلاعات انجام نشد. دوباره تلاش کنید.", buttons=wizard_buttons())
+    except PermissionError as exc:
+        await event.respond(f"❌ {exc}\n\nAPI Key را بررسی کنید و دوباره ارسال کنید.", buttons=wizard_buttons())
         return
-
+    except Exception as exc:
+        await event.respond(f"❌ پردازش اطلاعات انجام نشد.\n{exc}", buttons=wizard_buttons())
+        return
     if next_step == RegistrationStep.REVIEW:
         record = await STORE.latest_for_owner(event.sender_id)
-        await event.respond(review_text(record), buttons=review_buttons())
+        await event.respond(review_text(record, message), buttons=review_buttons())
         return
     await event.respond(message or PROMPTS[next_step], buttons=wizard_buttons())
 
@@ -88,18 +89,10 @@ async def process_step(record: RepresentativeRegistration, step: RegistrationSte
         brand = RegistrationService.validate_brand(value)
         await STORE.update(record.id, brand=brand, step=RegistrationStep.BOT_TOKEN.value)
         return RegistrationStep.BOT_TOKEN, None
-
     if step == RegistrationStep.BOT_TOKEN:
         bot = await BOT_VERIFIER.get_me(value)
-        await STORE.update(
-            record.id,
-            bot_id=int(bot["id"]),
-            bot_token_encrypted=get_secret_box().encrypt(value),
-            step=RegistrationStep.BOT_ID.value,
-        )
-        username = bot.get("username") or "بدون نام کاربری"
-        return RegistrationStep.BOT_ID, f"✅ ربات `@{username}` شناسایی شد.\n\n{PROMPTS[RegistrationStep.BOT_ID]}"
-
+        await STORE.update(record.id, bot_id=int(bot["id"]), bot_token_encrypted=get_secret_box().encrypt(value), step=RegistrationStep.BOT_ID.value)
+        return RegistrationStep.BOT_ID, f"✅ ربات `@{bot.get('username') or 'بدون نام کاربری'}` شناسایی شد.\n\n{PROMPTS[RegistrationStep.BOT_ID]}"
     if step == RegistrationStep.BOT_ID:
         if not value.isdigit():
             raise ValidationError("Bot ID باید فقط عدد باشد.")
@@ -107,33 +100,32 @@ async def process_step(record: RepresentativeRegistration, step: RegistrationSte
             raise ValidationError("Bot ID با Bot Token مطابقت ندارد.")
         await STORE.set_step(record.id, RegistrationStep.PANEL_URL)
         return RegistrationStep.PANEL_URL, None
-
     if step == RegistrationStep.PANEL_URL:
         url = RegistrationService.normalize_panel_url(value)
         await STORE.update(record.id, panel_url=url, step=RegistrationStep.PANEL_USERNAME.value)
         return RegistrationStep.PANEL_USERNAME, None
-
     if step == RegistrationStep.PANEL_USERNAME:
         if not 2 <= len(value) <= 190 or " " in value:
             raise ValidationError("نام کاربری پنل معتبر نیست.")
         await STORE.update(record.id, panel_username=value, step=RegistrationStep.PANEL_API_KEY.value)
         return RegistrationStep.PANEL_API_KEY, None
-
     if step == RegistrationStep.PANEL_API_KEY:
         if len(value) < 8:
             raise ValidationError("API Key خیلی کوتاه است.")
         if not record.panel_url:
             raise ValidationError("آدرس پنل ثبت نشده است.")
         client = PasarguardClient(record.panel_url, value)
-        if not await client.health():
-            raise ValidationError("اتصال به پنل یا API Key معتبر نیست.")
-        await STORE.update(
-            record.id,
-            panel_api_key_encrypted=get_secret_box().encrypt(value),
-            step=RegistrationStep.REVIEW.value,
+        probe = await client.probe()
+        await STORE.update(record.id, panel_api_key_encrypted=get_secret_box().encrypt(value), step=RegistrationStep.REVIEW.value)
+        test = probe.test_user
+        sub = test.subscription_url or "در پاسخ API موجود نبود"
+        return RegistrationStep.REVIEW, (
+            "✅ **اتصال به پنل پاسارگارد موفق بود.**\n\n"
+            f"👥 تعداد کلاینت‌ها بعد از ساخت تست: **{probe.client_count}**\n"
+            f"🧪 کلاینت تستی: `{test.service_id}`\n"
+            f"🔗 Subscription: `{sub}`\n\n"
+            "کلاینت تستی برای تأیید واقعی اتصال ساخته شد."
         )
-        return RegistrationStep.REVIEW, None
-
     raise ValidationError("مرحله ثبت نام نامعتبر است. از منوی اصلی دوباره شروع کنید.")
 
 
@@ -145,14 +137,7 @@ async def confirm_registration(event):
     if record is None or record.status != RegistrationStatus.DRAFT.value:
         await event.edit("❌ درخواست قابل تأیید نیست.")
         return
-    required = (
-        record.brand,
-        record.bot_id,
-        record.bot_token_encrypted,
-        record.panel_url,
-        record.panel_username,
-        record.panel_api_key_encrypted,
-    )
+    required = (record.brand, record.bot_id, record.bot_token_encrypted, record.panel_url, record.panel_username, record.panel_api_key_encrypted)
     if not all(required):
         await event.edit("❌ اطلاعات ناقص است. به مراحل ثبت برگردید.", buttons=wizard_buttons())
         return
@@ -162,12 +147,7 @@ async def confirm_registration(event):
             await event.client.send_message(admin_id, admin_notification(record))
         except Exception:
             continue
-    await event.edit(
-        "✅ **درخواست ثبت شد**\n\n"
-        f"🆔 کد پیگیری: `{record.tracking_code}`\n\n"
-        "درخواست برای بررسی ارسال شد. وضعیت را از منوی اصلی پیگیری کنید.",
-        buttons=[[Button.inline("🔎 مشاهده وضعیت", b"central:track:latest")]],
-    )
+    await event.edit("✅ **درخواست ثبت شد**\n\n" f"🆔 کد پیگیری: `{record.tracking_code}`\n\nدرخواست برای بررسی ارسال شد.", buttons=[[Button.inline("🔎 مشاهده وضعیت", b"central:track:latest")]])
 
 
 async def cancel_registration(event):
@@ -184,14 +164,7 @@ async def back_registration(event):
     record = await STORE.latest_for_owner(event.sender_id)
     if record is None or record.status != RegistrationStatus.DRAFT.value:
         return
-    previous = {
-        RegistrationStep.BOT_TOKEN: RegistrationStep.BRAND,
-        RegistrationStep.BOT_ID: RegistrationStep.BOT_TOKEN,
-        RegistrationStep.PANEL_URL: RegistrationStep.BOT_ID,
-        RegistrationStep.PANEL_USERNAME: RegistrationStep.PANEL_URL,
-        RegistrationStep.PANEL_API_KEY: RegistrationStep.PANEL_USERNAME,
-        RegistrationStep.REVIEW: RegistrationStep.PANEL_API_KEY,
-    }.get(RegistrationStep(record.step))
+    previous = {RegistrationStep.BOT_TOKEN: RegistrationStep.BRAND, RegistrationStep.BOT_ID: RegistrationStep.BOT_TOKEN, RegistrationStep.PANEL_URL: RegistrationStep.BOT_ID, RegistrationStep.PANEL_USERNAME: RegistrationStep.PANEL_URL, RegistrationStep.PANEL_API_KEY: RegistrationStep.PANEL_USERNAME, RegistrationStep.REVIEW: RegistrationStep.PANEL_API_KEY}.get(RegistrationStep(record.step))
     if previous is None:
         await event.edit(PROMPTS[RegistrationStep.BRAND], buttons=wizard_buttons())
         return
@@ -204,31 +177,12 @@ def wizard_buttons():
 
 
 def review_buttons():
-    return [
-        [Button.inline("✅ تأیید و ارسال", CONFIRM)],
-        [Button.inline("🔙 اصلاح اطلاعات", BACK), Button.inline("❌ لغو", CANCEL)],
-    ]
+    return [[Button.inline("✅ تأیید و ارسال", CONFIRM)], [Button.inline("🔙 اصلاح اطلاعات", BACK), Button.inline("❌ لغو", CANCEL)]]
 
 
-def review_text(record) -> str:
-    return (
-        "📋 **بازبینی نهایی درخواست**\n\n"
-        f"🏷 برند: {record.brand}\n"
-        f"🤖 Bot ID: `{record.bot_id}`\n"
-        f"🌐 پنل: `{record.panel_url}`\n"
-        f"👤 نام کاربری پنل: `{record.panel_username}`\n"
-        "🔐 API Key: `••••••••`\n\n"
-        "اگر اطلاعات درست است، ارسال نهایی را بزنید."
-    )
+def review_text(record, probe_message: str | None = None) -> str:
+    return ("📋 **بازبینی نهایی درخواست**\n\n" f"🏷 برند: {record.brand}\n" f"🤖 Bot ID: `{record.bot_id}`\n" f"🌐 پنل: `{record.panel_url}`\n" f"👤 نام کاربری پنل: `{record.panel_username}`\n" "🔐 API Key: `••••••••`\n\n" + (probe_message + "\n\n" if probe_message else "") + "اگر اطلاعات درست است، ارسال نهایی را بزنید.")
 
 
 def admin_notification(record) -> str:
-    return (
-        "🔔 **درخواست جدید نمایندگی**\n\n"
-        f"🆔 کد: `{record.tracking_code}`\n"
-        f"👤 مالک: `{record.owner_id}`\n"
-        f"🏷 برند: {record.brand}\n"
-        f"🤖 Bot ID: `{record.bot_id}`\n"
-        f"🌐 پنل: `{record.panel_url}`\n\n"
-        "برای بررسی کامل، از پنل مدیریت مرکزی استفاده کنید."
-    )
+    return ("🔔 **درخواست جدید نمایندگی**\n\n" f"🆔 کد: `{record.tracking_code}`\n" f"👤 مالک: `{record.owner_id}`\n" f"🏷 برند: {record.brand}\n" f"🤖 Bot ID: `{record.bot_id}`\n" f"🌐 پنل: `{record.panel_url}`\n\n" "برای بررسی کامل، از پنل مدیریت مرکزی استفاده کنید.")
