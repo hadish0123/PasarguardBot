@@ -1,8 +1,8 @@
 from __future__ import annotations
+
 from telethon import Button, events
 from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
-from app.services.orders import SERVICE as ORDER_SERVICE
 from app.services.plans import PlanService
 from app.services.representative_users import SERVICE as USER_SERVICE
 from app.services.texts import SERVICE as TEXT_SERVICE
@@ -10,21 +10,13 @@ from app.services.texts import SERVICE as TEXT_SERVICE
 USER_PREFIX = b"user:"
 
 
-async def customer_menu():
-    v = await TEXT_SERVICE.all()
-    return [
-        [Button.inline(v["buy_button"], USER_PREFIX + b"buy")],
-        [Button.inline(v["services_button"], USER_PREFIX + b"services"), Button.inline(v["wallet_button"], USER_PREFIX + b"wallet")],
-        [Button.inline(v["profile_button"], USER_PREFIX + b"profile"), Button.inline(v["referral_button"], USER_PREFIX + b"referral")],
-        [Button.inline(v["discount_button"], USER_PREFIX + b"discount"), Button.inline(v["trial_button"], USER_PREFIX + b"trial")],
-        [Button.inline(v["support_button"], USER_PREFIX + b"support")],
-    ]
+async def customer_menu(values: dict | None = None):
+    from app.telegram.representative.navigation import customer_menu as _menu
+    return await _menu(values)
 
 
 def register(client, tenant_id=None):
     async def callback(event):
-        # USER_PREFIX is a namespace, not a complete callback value.
-        # The compatibility layer's exact data filter cannot match user:buy/order:123.
         raw = event.data
         try:
             data = bytes(raw or b"")
@@ -46,17 +38,19 @@ async def _allowed(event):
 
 
 async def show_home(event):
+    values = await TEXT_SERVICE.all()
     await event.respond(
-        await TEXT_SERVICE.get("shop_title") + "\n\n" + await TEXT_SERVICE.get("shop_hint"),
-        buttons=await customer_menu(),
+        values["shop_title"] + "\n\n" + values["shop_hint"],
+        buttons=await customer_menu(values),
     )
 
 
 async def _buy(event):
     plans = [p for p in await PlanService().list() if p.enabled]
+    values = await TEXT_SERVICE.all()
     if not plans:
         return await event.edit(
-            await TEXT_SERVICE.get("buy_title") + "\n\n" + await TEXT_SERVICE.get("plans_empty"),
+            values["buy_title"] + "\n\n" + values["plans_empty"],
             buttons=[[Button.inline("🔙 فروشگاه", USER_PREFIX + b"home")]],
         )
     rows = [
@@ -64,7 +58,7 @@ async def _buy(event):
         for p in plans
     ]
     rows.append([Button.inline("🔙 فروشگاه", USER_PREFIX + b"home")])
-    await event.edit(await TEXT_SERVICE.get("buy_title") + "\n\n" + await TEXT_SERVICE.get("buy_hint"), buttons=rows)
+    return await event.edit(values["buy_title"] + "\n\n" + values["buy_hint"], buttons=rows)
 
 
 async def callback_handler(event):
@@ -81,13 +75,12 @@ async def callback_handler(event):
 
     action = data[len(USER_PREFIX):].decode(errors="ignore")
 
-    # Only handle the base user namespace actions here. Specialized modules
-    # own referral/trial/support callbacks and will receive them independently.
     if action == "home":
         await event.answer()
+        values = await TEXT_SERVICE.all()
         return await event.edit(
-            await TEXT_SERVICE.get("shop_title") + "\n\n" + await TEXT_SERVICE.get("shop_hint"),
-            buttons=await customer_menu(),
+            values["shop_title"] + "\n\n" + values["shop_hint"],
+            buttons=await customer_menu(values),
         )
 
     if action == "buy":
@@ -118,34 +111,14 @@ async def callback_handler(event):
         return await render(event)
 
     if action.startswith("order:"):
-        try:
-            plan_id = int(action.split(":", 1)[1])
-        except (ValueError, IndexError):
-            return await event.answer("شناسه پلن نامعتبر است.", alert=True)
+        # The plan button must enter the real checkout flow. The previous
+        # implementation created an order directly here and could race with
+        # the dedicated checkout callback router, producing an invalid-option
+        # response instead of the confirmation/payment screen.
+        await event.answer()
+        from app.telegram.representative.checkout import callback as checkout_callback
+        return await checkout_callback(event, get_tenant())
 
-        # Acknowledge immediately so Telegram never shows a slow callback spinner
-        # while the database/order operation is running.
-        await event.answer("⏳ در حال ثبت سفارش...")
-        try:
-            order = await ORDER_SERVICE.create(event.sender_id, plan_id)
-        except LookupError:
-            return await event.edit(
-                "❌ این پلن دیگر قابل خرید نیست.",
-                buttons=[[Button.inline("🔙 بازگشت به خرید", USER_PREFIX + b"buy")]],
-            )
-
-        return await event.edit(
-            f"✅ **سفارش #{order.id} ثبت شد**\n\n"
-            f"📦 {order.plan_name}\n"
-            f"💰 مبلغ: **{order.amount:,.2f}**\n"
-            f"📌 وضعیت: **در انتظار پرداخت**",
-            buttons=[
-                [Button.inline("🛒 خرید دوباره", USER_PREFIX + b"buy")],
-                [Button.inline("📦 سرویس‌های من", USER_PREFIX + b"services")],
-                [Button.inline("🏪 فروشگاه", USER_PREFIX + b"home")],
-            ],
-        )
-
-    # Let specialized user modules (referral/trial/support) handle their
-    # own callbacks. Do not emit a false "invalid option" alert here.
+    # referral/trial/support have their own namespaced handlers. They are
+    # intentionally not rejected here so their specialized routers can run.
     return
