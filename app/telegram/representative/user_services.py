@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-
 from telethon import Button, events
-
 from app.core.ids import USER_HOME
 from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
@@ -13,26 +11,24 @@ from app.services.orders import SERVICE as ORDERS
 
 PREFIX = b"user:services:"
 
-
 def register(client, tenant_id=None):
     async def callback(event):
         async with tenant_dispatch(tenant_id):
             if not await allowed(event):
                 return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
+            await event.answer()
             await render_callback(event)
     client.add_event_handler(callback, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
 
 async def allowed(event):
-    if not event.is_private or not get_tenant():
-        return False
+    if not event.is_private or not get_tenant(): return False
     user = await USERS.get_by_telegram_id(event.sender_id)
     return bool(user and not user.blocked)
 
 def _status(service) -> str:
     if service.status == "active" and service.expires_at:
         expiry = service.expires_at.replace(tzinfo=timezone.utc) if service.expires_at.tzinfo is None else service.expires_at
-        if expiry <= datetime.now(timezone.utc):
-            return "⚫ منقضی‌شده"
+        if expiry <= datetime.now(timezone.utc): return "⚫ منقضی‌شده"
     return {"pending_provisioning":"⏳ در انتظار تحویل","provisioning":"🔄 در حال ساخت","active":"🟢 فعال","revoked":"🔴 لغوشده"}.get(service.status, service.status)
 
 def _date(value):
@@ -58,14 +54,14 @@ async def render_user(telegram_user_id: int):
 async def render_callback(event):
     action = event.data[len(PREFIX):].decode(errors="ignore")
     if action in ("", "list"):
-        t,b = await render_user(event.sender_id); await event.edit(t, buttons=b); return await event.answer()
+        t,b = await render_user(event.sender_id); await event.edit(t, buttons=b); return
     if action.startswith("view:"):
         try: sid = int(action.split(":",1)[1])
         except ValueError: return await event.answer("شناسه سرویس نامعتبر است.", alert=True)
         service = await SERVICE.subscription(event.sender_id, sid)
         if service is None: return await event.answer("سرویس پیدا نشد.", alert=True)
         status = _status(service)
-        t = (f"📦 **سرویس #{service.id}**\n\n" f"📌 پلن: **{service.plan_name}**\n" f"💾 حجم: **{service.volume_gb:g} GB**\n" f"📅 مدت: **{service.days} روز**\n" f"📊 وضعیت: **{status}**\n" f"🟢 شروع: **{_date(service.starts_at)}**\n" f"⏰ انقضا: **{_date(service.expires_at)}**")
+        t = (f"📦 **سرویس #{service.id}**\n\n" f"📌 پلن: **{service.plan_name}**\n" f"💾 حجم: **{service.volume_gb:g} GB**\n" f"📅 مدت: **{service.days} روز**\n" f"📊 وضعیت: **{status}**\n" f"🟢 شروع: **{_date(service.starts_at)}**\n" f"⏰ انقضا: **{_date(service.expires_at)}")
         buttons=[]
         if service.subscription_url and status in {"🟢 فعال","⚫ منقضی‌شده"}: buttons.append([Button.url("🔗 لینک اشتراک", service.subscription_url)])
         buttons += [[Button.inline("🔄 بروزرسانی", PREFIX + f"view:{sid}".encode())], [Button.inline("🔙 سرویس‌های من", PREFIX + b"list")]]
