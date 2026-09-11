@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import re
+
 from telethon import Button, events
 from telethon.tl.custom import Message
 
@@ -37,7 +40,7 @@ MODULE_ORDER = 50
 REP_MENU = {
     "🗂 پنل نماینده",
     "🗞 مدیریت پلن‌ها",
-    "مدیریت پلن‌ها",  # compatibility with the existing reply keyboard label
+    "مدیریت پلن‌ها",
     "📊 وضعیت پنل",
     "⚙️ تنظیمات فروش",
     "🎟 کدهای تخفیف",
@@ -52,6 +55,26 @@ def _rep_admin(event) -> bool:
     return bool(is_representative_runtime() and is_runtime_admin(event.sender_id) and event.is_private)
 
 
+def _normalize_menu_text(value: str | None) -> str:
+    """Normalize Telegram Persian text so reply-keyboard labels cannot miss by Unicode noise."""
+    text = (value or "").replace("\u200c", " ").replace("\u200f", "").replace("\u200e", "")
+    text = text.replace("ي", "ی").replace("ى", "ی").replace("ك", "ک")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _is_plan_management_label(text: str) -> bool:
+    normalized = _normalize_menu_text(text)
+    return normalized in {"مدیریت پلن‌ها", "🗞 مدیریت پلن‌ها"}
+
+
+async def _reset_plan_flow(user_id: int) -> None:
+    """Never carry an unfinished create-plan state into an admin menu."""
+    with contextlib.suppress(Exception):
+        await clear_user(user_id)
+    await set_step(user_id, "panel")
+
+
 async def _tenant_panel():
     tenant = get_current_tenant()
     if not tenant:
@@ -62,13 +85,6 @@ async def _tenant_panel():
 async def _tenant_panel_code() -> int | None:
     panel = await _tenant_panel()
     return int(panel.code) if panel else None
-
-
-async def _reset_plan_flow(user_id: int) -> None:
-    """Never carry an unfinished create-plan state into the plan management menu."""
-    with __import__("contextlib").suppress(Exception):
-        await clear_user(user_id)
-    await set_step(user_id, "panel")
 
 
 async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
@@ -84,7 +100,8 @@ async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
 
 
 async def _show_plan_menu(event):
-    # Entering this menu must cancel any stale add-plan wizard first.
+    # This is deliberately a hard reset: the reply-keyboard menu must always
+    # take precedence over a stale add-plan wizard left in Redis/in-memory state.
     await _reset_plan_flow(event.sender_id)
     await event.respond(
         "🗞 **مدیریت پلن‌ها**\n\nپلن‌ها فقط برای پنل نماینده فعلی مدیریت می‌شوند.\nثبت یا حذف پنل از این بخش مجاز نیست.",
@@ -122,15 +139,22 @@ async def _show_sales_menu(event):
 async def _rep_menu_handler(event: Message):
     if not _rep_admin(event):
         return
-    msg = (event.message.text or "").strip()
-    if msg not in REP_MENU:
+    msg = _normalize_menu_text(event.message.text)
+    if not msg:
+        return
+
+    # Handle the plan-management label before any other stateful plan handler.
+    # This prevents a previous addPlan_1/addPlan_2/... state from consuming a
+    # reply-keyboard click as plan input.
+    if _is_plan_management_label(msg):
+        await _show_plan_menu(event)
         return
 
     if msg == "🗂 پنل نماینده":
+        await _reset_plan_flow(event.sender_id)
         await display_panels(event.sender_id, current_page=1)
-    elif msg in {"🗞 مدیریت پلن‌ها", "مدیریت پلن‌ها"}:
-        await _show_plan_menu(event)
     elif msg == "📊 وضعیت پنل":
+        await _reset_plan_flow(event.sender_id)
         panel = await _tenant_panel()
         if not panel:
             await event.respond("❌ پنل نماینده پیدا نشد.")
@@ -145,19 +169,25 @@ async def _rep_menu_handler(event: Message):
             ],
         )
     elif msg == "⚙️ تنظیمات فروش":
+        await _reset_plan_flow(event.sender_id)
         await _show_sales_menu(event)
     elif msg == "🎟 کدهای تخفیف":
+        await _reset_plan_flow(event.sender_id)
         from app.telegram.admin.discounts.service import show_main_menu
         await show_main_menu(event)
         await set_step(event.sender_id, "takhfif_select")
     elif msg == "👥 کاربران":
+        await _reset_plan_flow(event.sender_id)
         await event.respond("👥 لطفاً آیدی عددی کاربر را ارسال کنید:", buttons=[[Button.text("🔙 بازگشت به پنل", resize=True)]])
         await set_step(event.sender_id, "MToUser")
     elif msg == "📝 متن‌ها و دکمه‌ها":
+        await _reset_plan_flow(event.sender_id)
         await event.respond("📝 **دکمه‌های منوی کاربر**\n\nمتن و ظاهر دکمه‌ها از همین بخش قابل تنظیم است.", buttons=await create_keyboard_buttons_admin_buttons(1), parse_mode="md")
     elif msg == "📝 مدیریت لاگ‌ها":
+        await _reset_plan_flow(event.sender_id)
         await event.respond("📝 **مدیریت لاگ‌ها**\n\nنوع لاگ و مقصد ارسال را انتخاب کنید.", buttons=log_main_menu_buttons(), parse_mode="md")
     elif msg == "🔗 لینک های آماده":
+        await _reset_plan_flow(event.sender_id)
         bot_username = await get_bot_username(Kenzo)
         await event.respond(format_admin_links_message(bot_username), buttons=[[Button.inline("🔙 بازگشت", data="back_to_admin_panel")]], parse_mode="md")
 
@@ -190,10 +220,12 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         raise events.StopPropagation
 
     if data == "PlanAddSelectPanel":
+        await _reset_plan_flow(event.sender_id)
         await _show_rep_plan_panel_selector(event, manage=False)
         raise events.StopPropagation
 
     if data == "PlanManageSelectPanel":
+        await _reset_plan_flow(event.sender_id)
         await _show_rep_plan_panel_selector(event, manage=True)
         raise events.StopPropagation
 
@@ -203,6 +235,8 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         if tenant_code is None or panel_code != tenant_code:
             await event.answer("⛔️ فقط پنل متصل به همین نماینده قابل مدیریت است.", alert=True)
             raise events.StopPropagation
+        # Clear any stale wizard state before entering either branch.
+        await _reset_plan_flow(event.sender_id)
         await plan_inline_callback(event)
         raise events.StopPropagation
 
@@ -230,11 +264,21 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         await callback_log_admin(event)
         raise events.StopPropagation
 
-    if data.startswith(("AdminReseller_", "MToUser_", "AdminConfig", "UserInfo:", "CreateConfigFor:", "BulkDeleteConfigs:", "confirm_phone_", "bansup_", "unbansup_", "sendm_")):
+    if data.startswith(("AdminReseller_", "MToUser_", "AdminConfig", "UserInfo:", "CreateConfigFor:", "BulkDeleteConfigs:", "confirm_phone_", "bansup_", "unbansup_", "sendm_", "AdminSearchConfig", "BackToUserManagement:")):
         await callback_manage_user_admin(event)
         raise events.StopPropagation
 
     if data.startswith(("Plan", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu", "plan_", "duration_", "ManagePlans_", "AddPlans_")):
+        tenant_code = await _tenant_panel_code()
+        panel_code = None
+        for prefix in ("ManagePlans_", "AddPlans_"):
+            if data.startswith(prefix):
+                with contextlib.suppress(ValueError):
+                    panel_code = int(data.split("_", 1)[1])
+                break
+        if panel_code is not None and tenant_code != panel_code:
+            await event.answer("⛔️ این پلن متعلق به پنل نماینده نیست.", alert=True)
+            raise events.StopPropagation
         await plan_inline_callback(event)
         raise events.StopPropagation
 
