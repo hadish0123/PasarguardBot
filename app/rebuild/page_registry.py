@@ -19,19 +19,23 @@ class PageSpec:
     entry: tuple[str, ...]
     buttons: tuple[str, ...]
     states: tuple[str, ...]
+    permission: str
+    data_scope: str
+    dependencies: tuple[str, ...]
 
 
-# Page A-01 is the first page being implemented. Every later page is added
-# only after this page's contract is complete and verified.
 PAGES: tuple[PageSpec, ...] = (
     PageSpec(
         id="C-01",
         area=Area.CENTRAL,
         title="Central Home",
-        purpose="Central bot entry point for representative lifecycle management.",
-        entry=("/start",),
-        buttons=("register_representative", "track_registration"),
-        states=("idle", "registration_pending", "no_active_registration"),
+        purpose="Private entry point for representative registration and owner-scoped request tracking.",
+        entry=("/start", "central:home"),
+        buttons=("register_representative", "track_registration", "track_latest", "cancel"),
+        states=("idle", "creating_request", "request_created", "tracking_input", "loading", "empty", "error"),
+        permission="private Telegram chat; each user may only read their own registration records",
+        data_scope="central database, owner_id scoped for registration reads",
+        dependencies=("SQLAlchemy", "PostgreSQL-compatible DATABASE_URL", "Telethon"),
     ),
     PageSpec(
         id="A-01",
@@ -41,6 +45,9 @@ PAGES: tuple[PageSpec, ...] = (
         entry=("/start", "main_menu"),
         buttons=("plans", "users", "sales", "discounts", "texts", "logs", "links", "settings", "support"),
         states=("loading", "ready", "empty", "error"),
+        permission="representative owner",
+        data_scope="tenant database",
+        dependencies=("tenant runtime", "Pasarguard API", "Redis"),
     ),
     PageSpec(
         id="U-01",
@@ -50,6 +57,9 @@ PAGES: tuple[PageSpec, ...] = (
         entry=("/start",),
         buttons=("buy", "my_services", "wallet", "profile", "referral", "trial", "support"),
         states=("loading", "ready", "empty", "error"),
+        permission="any customer inside a representative bot",
+        data_scope="current representative tenant",
+        dependencies=("tenant runtime", "Pasarguard API"),
     ),
 )
 
