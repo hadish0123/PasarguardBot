@@ -51,8 +51,8 @@ class OrderService:
   async with SessionFactory() as session:
    order=await session.scalar(select(Order).where(Order.id==order_id,Order.tenant_id==require_tenant()))
    if order is None: raise LookupError("سفارش پیدا نشد.")
-   if order.status not in {"pending"}: raise ValueError("این سفارش دیگر قابل پرداخت نیست.")
-   record=await session.scalar(select(CheckoutRecord).where(CheckoutRecord.tenant_id==order.tenant_id,CheckoutRecord.order_id=order.id))
+   if order.status != "pending": raise ValueError("این سفارش دیگر قابل پرداخت نیست.")
+   record=await session.scalar(select(CheckoutRecord).where(CheckoutRecord.tenant_id==order.tenant_id,CheckoutRecord.order_id==order.id))
    if record is None: raise LookupError("جزئیات پرداخت سفارش پیدا نشد.")
    record.payment_reference=reference; record.payment_submitted_at=datetime.now(timezone.utc)
    await session.commit(); await session.refresh(order)
