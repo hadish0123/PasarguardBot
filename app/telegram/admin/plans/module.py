@@ -30,9 +30,34 @@ async def representative_plan_menu_entry(event):
     await event.respond("یکی از گزینه‌های زیر را انتخاب کنید:", buttons=buttons)
 
 
+async def representative_plan_message_entry(event):
+    """Route representative plan-creation text into the existing plan handler.
+
+    The legacy plans message registration is restricted to ADMIN_ID, while a
+    representative runtime uses the tenant owner as its admin. Keep the
+    existing plan flow intact and only add the missing runtime routing layer.
+    """
+    if not event.is_private or not is_representative_runtime():
+        return
+    if not is_runtime_admin(event.sender_id):
+        return
+
+    msg = (getattr(event.message, "text", None) or "").strip()
+    if not msg:
+        return
+
+    step = await messages.get_step(event.sender_id)
+    if step in {"addPlan_1", "addPlan_2", "addPlan_3", "addPlan_4"}:
+        await messages.message_handler_plans(event)
+
+
 def register_representative_entry(client):
     client.add_event_handler(
         representative_plan_menu_entry,
+        events.NewMessage(incoming=True),
+    )
+    client.add_event_handler(
+        representative_plan_message_entry,
         events.NewMessage(incoming=True),
     )
 
