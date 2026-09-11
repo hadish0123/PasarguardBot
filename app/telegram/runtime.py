@@ -54,7 +54,7 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
 
 
 async def _stop_representative_runtimes() -> None:
-    tenants = await TenantService().list_runtime_tenants()
+    tenants = await TenantService().list_runtime_tenants(settings.central_bot_token)
     for tenant in tenants:
         try:
             await registry.stop(tenant.id)
