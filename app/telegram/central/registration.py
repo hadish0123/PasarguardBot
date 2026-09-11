@@ -19,6 +19,7 @@ CANCEL = b"central:registration:cancel"
 CONTINUE = b"central:registration:continue"
 CONFIRM = b"central:registration:confirm"
 BACK = b"central:registration:back"
+ADMIN_PREFIX = b"central:admin:"
 
 PROMPTS = {
     RegistrationStep.BRAND: "🏷 **مرحله ۱ از ۶ — نام برند**\n\nنام برند نمایندگی را ارسال کنید.",
@@ -144,7 +145,11 @@ async def confirm_registration(event):
     await STORE.mark_pending(record.id)
     for admin_id in settings.admin_ids:
         try:
-            await event.client.send_message(admin_id, admin_notification(record))
+            await event.client.send_message(
+                admin_id,
+                admin_notification(record),
+                buttons=admin_notification_buttons(record.id),
+            )
         except Exception:
             continue
     await event.edit("✅ **درخواست ثبت شد**\n\n" f"🆔 کد پیگیری: `{record.tracking_code}`\n\nدرخواست برای بررسی ارسال شد.", buttons=[[Button.inline("🔎 مشاهده وضعیت", b"central:track:latest")]])
@@ -178,6 +183,16 @@ def wizard_buttons():
 
 def review_buttons():
     return [[Button.inline("✅ تأیید و ارسال", CONFIRM)], [Button.inline("🔙 اصلاح اطلاعات", BACK), Button.inline("❌ لغو", CANCEL)]]
+
+
+def admin_notification_buttons(registration_id: int):
+    return [
+        [Button.inline("🔎 بررسی درخواست", ADMIN_PREFIX + f"view:{registration_id}".encode())],
+        [
+            Button.inline("✅ تأیید و شروع راه‌اندازی", ADMIN_PREFIX + f"approve:{registration_id}".encode()),
+            Button.inline("❌ رد درخواست", ADMIN_PREFIX + f"reject_prompt:{registration_id}".encode()),
+        ],
+    ]
 
 
 def review_text(record, probe_message: str | None = None) -> str:
