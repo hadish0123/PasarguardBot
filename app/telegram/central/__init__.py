@@ -9,6 +9,7 @@ STORE = RegistrationStore()
 CANCEL = b"central:cancel"
 HOME = b"central:home"
 TRACK_INPUT = b"central:track:input"
+TRACK_LATEST = b"central:track:latest"
 
 
 def menu():
@@ -27,6 +28,7 @@ def register_central_handlers(client) -> None:
     client.add_event_handler(text_router, events.NewMessage(incoming=True))
     client.add_event_handler(register, events.CallbackQuery(data=b"central:register"))
     client.add_event_handler(track_input, events.CallbackQuery(data=TRACK_INPUT))
+    client.add_event_handler(track_latest, events.CallbackQuery(data=TRACK_LATEST))
     client.add_event_handler(home, events.CallbackQuery(data=HOME))
     client.add_event_handler(cancel, events.CallbackQuery(data=CANCEL))
 
@@ -67,9 +69,9 @@ async def register(event):
         "درخواست شما ایجاد شد.\n\n"
         f"🆔 کد پیگیری: `{record.tracking_code}`\n\n"
         "در مرحله بعد اطلاعات ربات و پنل را وارد می‌کنید.\n"
-        "هر زمان خواستید می‌توانید با همین کد وضعیت درخواست را پیگیری کنید.",
+        "این کد را تا پایان فرایند نگه دارید.",
         buttons=[
-            [Button.inline("▶️ ادامه ثبت", b"central:registration:continue")],
+            [Button.inline("🔎 مشاهده وضعیت", TRACK_LATEST)],
             [Button.inline("🔙 بازگشت", HOME)],
         ],
     )
@@ -87,6 +89,27 @@ async def track_input(event):
     )
 
 
+async def track_latest(event):
+    if not _private(event):
+        return
+    await event.answer()
+    try:
+        record = await STORE.latest_for_owner(event.sender_id)
+    except Exception:
+        await event.edit(
+            "❌ دریافت وضعیت درخواست ممکن نشد.\n\nلطفاً دوباره تلاش کنید.",
+            buttons=back_button(),
+        )
+        return
+    if record is None:
+        await event.edit(
+            "📭 هنوز هیچ درخواست نمایندگی برای حساب شما ثبت نشده است.",
+            buttons=menu(),
+        )
+        return
+    await event.edit(registration_status_text(record), buttons=menu())
+
+
 async def text_router(event):
     if not _private(event) or not event.raw_text:
         return
@@ -97,7 +120,11 @@ async def text_router(event):
         await event.respond(home_text(), buttons=menu())
         return
     if text.upper().startswith("PG-"):
-        record = await STORE.get_by_tracking_code(event.sender_id, text.upper())
+        try:
+            record = await STORE.get_by_tracking_code(event.sender_id, text.upper())
+        except Exception:
+            await event.respond("❌ پیگیری درخواست در حال حاضر در دسترس نیست.", buttons=menu())
+            return
         if record is None:
             await event.respond(
                 "❌ کد پیگیری پیدا نشد.\n\n"
