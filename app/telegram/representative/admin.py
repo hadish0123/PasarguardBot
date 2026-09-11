@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from telethon import Button, events
 
-from app.core.ids import REP_DASHBOARD, REP_DISCOUNTS, REP_LINKS, REP_LOGS, REP_ORDERS, REP_PLANS, REP_SALES, REP_SETTINGS, REP_TEXTS, REP_USERS
+from app.core.ids import REP_HOME, REP_DISCOUNTS, REP_LINKS, REP_LOGS, REP_ORDERS, REP_PLANS, REP_SALES, REP_SETTINGS, REP_TEXTS, REP_USERS
 from app.services.representative_dashboard import RepresentativeDashboardService
 from app.runtime.context import get_tenant
 
@@ -11,7 +11,7 @@ SERVICE = RepresentativeDashboardService()
 PREFIX = b"rep:"
 
 ADMIN_MENU = [
-    [Button.inline("📊 داشبورد", PREFIX + REP_DASHBOARD.encode())],
+    [Button.inline("📊 داشبورد", PREFIX + REP_HOME.encode())],
     [Button.inline("🗂 مدیریت پلن‌ها", PREFIX + REP_PLANS.encode()), Button.inline("👥 کاربران", PREFIX + REP_USERS.encode())],
     [Button.inline("🛒 فروش و سفارش‌ها", PREFIX + REP_ORDERS.encode())],
     [Button.inline("🎟 تخفیف‌ها", PREFIX + REP_DISCOUNTS.encode()), Button.inline("⚙️ تنظیمات فروش", PREFIX + REP_SALES.encode())],
@@ -55,7 +55,7 @@ async def admin_callback(event) -> None:
         await event.answer("دسترسی مدیریت ندارید.", alert=True)
         return
     action = event.data[len(PREFIX):].decode(errors="ignore")
-    if action == REP_DASHBOARD:
+    if action == REP_HOME:
         await event.edit(await dashboard_text(), buttons=ADMIN_MENU)
         await event.answer()
         return
@@ -73,9 +73,8 @@ async def admin_callback(event) -> None:
     if action in labels:
         await event.edit(
             f"{labels[action]}\n\n"
-            "این بخش در مرحله بعدی معماری نمایندگی به‌صورت کامل فعال می‌شود.\n"
-            "🔙 برای بازگشت، داشبورد را بزنید.",
-            buttons=[[Button.inline("📊 داشبورد", PREFIX + REP_DASHBOARD.encode())]],
+            "این بخش در مرحله بعدی معماری نمایندگی به‌صورت کامل فعال می‌شود.",
+            buttons=[[Button.inline("📊 داشبورد", PREFIX + REP_HOME.encode())]],
         )
         await event.answer()
         return
