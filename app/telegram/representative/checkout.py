@@ -69,6 +69,34 @@ async def callback(event, tenant_id):
             return await event.answer("دسترسی ندارید.", alert=True)
         action = event.data[len(PREFIX):].decode(errors="ignore")
         s = STATE.setdefault(key(tenant_id, event.sender_id), {})
+
+        if action.startswith("resume:"):
+            try:
+                order_id = int(action.split(":", 1)[1])
+            except (IndexError, ValueError):
+                return await event.answer("شناسه سفارش نامعتبر است.", alert=True)
+            order = await ORDER_SERVICE.get(order_id)
+            if order is None or order.telegram_user_id != event.sender_id:
+                return await event.answer("سفارش پیدا نشد.", alert=True)
+            if order.status != "pending":
+                return await event.answer("این سفارش دیگر قابل پرداخت نیست.", alert=True)
+            record = await ORDER_SERVICE.checkout_record(order.id)
+            if record is None:
+                return await event.answer("جزئیات پرداخت سفارش پیدا نشد.", alert=True)
+            s.clear()
+            s["payment_order_id"] = order.id
+            sales = await SALES_SERVICE.snapshot()
+            currency = sales.get("currency", "تومان")
+            await event.edit(
+                f"🧾 **ادامه پرداخت سفارش #{order.id}**\n\n📦 {order.plan_name}\n"
+                f"💰 پایه: **{record.subtotal:,.2f} {currency}**\n"
+                f"➖ تخفیف: **{record.discount_amount:,.2f} {currency}**\n"
+                f"💳 نهایی: **{record.total:,.2f} {currency}**\n\n"
+                "شناسه پرداخت/کد پیگیری را ارسال کنید.\n\nبرای لغو `/cancel` را بفرستید.",
+                buttons=[[Button.inline("🏪 فروشگاه", b"user:home")]],
+            )
+            return await event.answer()
+
         if action == "pay":
             plan_id = s.get("plan_id")
             if not plan_id:
@@ -108,11 +136,13 @@ async def callback(event, tenant_id):
                 buttons=[[Button.inline("🔙 بازگشت", PREFIX + b"back")]],
             )
         if action == "clear":
+            if not s.get("plan_id"):
+                return await event.answer("جلسه خرید منقضی شده است.", alert=True)
             s.pop("code", None)
             return await render(event, int(s["plan_id"]))
         if action == "back":
             s.pop("awaiting_discount", None)
-            return await render(event, int(s["plan_id"]))
+            return await render(event, int(s["plan_id"])) if s.get("plan_id") else await event.answer("جلسه خرید منقضی شده است.", alert=True)
         return await event.answer("گزینه نامعتبر است.", alert=True)
 
 
@@ -136,8 +166,6 @@ async def incoming(event, tenant_id):
                 if not plan_id:
                     STATE.pop(key(tenant_id, event.sender_id), None)
                     return await event.respond("❌ جلسه خرید منقضی شد؛ دوباره از فروشگاه شروع کنید.")
-                # Re-render the same checkout immediately so the user sees the
-                # discounted amount instead of having to navigate back manually.
                 await event.respond(f"✅ کد **{item.code}** اعمال شد.")
                 return await render(event, int(plan_id))
             except (LookupError, ValueError) as exc:
