@@ -21,6 +21,12 @@ class Tenant:
     status: str
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeTenant:
+    id: str
+    bot_token: str
+
+
 class TenantService:
     """Persistent tenant lifecycle with idempotent provisioning."""
 
@@ -74,6 +80,27 @@ class TenantService:
         async with SessionFactory() as session:
             record = await session.scalar(select(TenantRecord).where(TenantRecord.registration_id == registration_id))
             return self._to_domain(record) if record else None
+
+    async def list_runtime_tenants(self) -> list[RuntimeTenant]:
+        """Return only active tenants with decryptable bot credentials for restart recovery."""
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        box = get_secret_box()
+        async with SessionFactory() as session:
+            rows = list((await session.execute(
+                select(TenantRecord).where(TenantRecord.status == TenantStatus.ACTIVE.value)
+            )).scalars().all())
+        tenants: list[RuntimeTenant] = []
+        for record in rows:
+            if not record.bot_token_encrypted:
+                continue
+            try:
+                token = box.decrypt(record.bot_token_encrypted)
+            except Exception:
+                continue
+            if token:
+                tenants.append(RuntimeTenant(record.id, token))
+        return tenants
 
     async def set_status(self, tenant_id: str, status: TenantStatus) -> Tenant:
         if SessionFactory is None:
