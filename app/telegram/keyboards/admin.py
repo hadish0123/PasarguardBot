@@ -1,9 +1,9 @@
-"""Admin keyboards, with a reduced tenant-safe menu for representative bots."""
+"""Admin keyboards, with a tenant-safe representative menu."""
 from telethon import Button
 from app.db.crud.user import UserCRUD
 from .common import create_button, glass_inline_button, glass_text_button, styled_simple_webview_button
 
-DOCS_URL = "https://amirkenzo.github.io/PasarguardBot/"
+DOCS_URL = "https://github.com/hadish0123/PasarguardBot"
 
 Lock_Channels_Menu_Buttons = [[glass_text_button("افزودن کانال"), glass_text_button("حذف کانال")], [glass_text_button("لیست کانال‌ها")], [glass_text_button("🔙 بازگشت به پنل")]]
 Lock_Channels_Inline_Menu = [[glass_inline_button("➕ افزودن کانال", data="lock_add"), glass_inline_button("📋 لیست کانال‌ها", data="lock_list:1")], [glass_inline_button("🔙 بازگشت به پنل", data="back_to_panel")]]
