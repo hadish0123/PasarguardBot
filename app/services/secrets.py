@@ -24,4 +24,11 @@ class SecretBox:
             raise RuntimeError("Encrypted secret cannot be decrypted") from exc
 
 
-secret_box = SecretBox(os.getenv("SECRET_KEY", ""))
+_box: SecretBox | None = None
+
+
+def get_secret_box() -> SecretBox:
+    global _box
+    if _box is None:
+        _box = SecretBox(os.getenv("SECRET_KEY", ""))
+    return _box
