@@ -30,8 +30,7 @@ def register(client, tenant_id=None):
             value = event.raw_text.strip()
             if value in {"/cancel", "لغو"}:
                 INPUTS.pop(key, None)
-                text, buttons = await render()
-                return await event.respond("❌ عملیات لغو شد.", buttons=buttons)
+                return await event.respond("❌ عملیات لغو شد.", buttons=(await render())[1])
             try:
                 await SERVICE.set(field, value)
             except ValueError as exc:
@@ -59,16 +58,23 @@ async def render():
     s = await SERVICE.snapshot()
     brand = s["brand"] or "پیش‌فرض ثبت‌نام"
     support = ("@" + s["support_username"]) if s["support_username"] else "تنظیم نشده"
+    card = s["payment_card_number"] or "تنظیم نشده"
+    holder = s["payment_card_holder"] or "تنظیم نشده"
     return (
         "⚙️ **تنظیمات نماینده**\n\n"
         f"🏷 برند: **{brand}**\n"
         f"🆘 پشتیبانی: **{support}**\n"
         f"🌍 منطقه زمانی: **{s['timezone']}**\n\n"
+        "💳 **اطلاعات پرداخت فروشگاه**\n"
+        f"💳 شماره کارت: **{card}**\n"
+        f"👤 به نام: **{holder}**\n\n"
         "این تنظیمات فقط برای همین نماینده ذخیره می‌شود.",
         [
             [Button.inline("🏷 ویرایش برند", PREFIX + b"edit:brand")],
             [Button.inline("🆘 پشتیبانی", PREFIX + b"edit:support_username")],
             [Button.inline("🌍 منطقه زمانی", PREFIX + b"edit:timezone")],
+            [Button.inline("💳 شماره کارت", PREFIX + b"edit:payment_card_number")],
+            [Button.inline("👤 نام صاحب کارت", PREFIX + b"edit:payment_card_holder")],
             [Button.inline("🔄 تازه‌سازی", PREFIX + b"list")],
             [Button.inline("📊 داشبورد", b"rep:" + REP_HOME.encode())],
         ],
@@ -84,6 +90,8 @@ async def handle(event):
             "brand": "🏷 نام برند جدید را ارسال کنید:",
             "support_username": "🆘 یوزرنیم پشتیبانی را ارسال کنید (مثال: support):",
             "timezone": "🌍 منطقه زمانی را ارسال کنید (مثال: Asia/Tehran):",
+            "payment_card_number": "💳 شماره کارت ۱۶ رقمی را ارسال کنید:",
+            "payment_card_holder": "👤 نام و نام خانوادگی صاحب کارت را ارسال کنید:",
         }
         if field not in prompts:
             return await event.answer("تنظیم نامعتبر است.", alert=True)
