@@ -71,7 +71,6 @@ def _button_markup(buttons):
     if isinstance(buttons, dict):
         return _serialize_value(buttons)
 
-    # Accept Telethon ReplyInlineMarkup / ReplyKeyboardMarkup directly.
     markup_name = buttons.__class__.__name__
     if markup_name in {"ReplyInlineMarkup", "ReplyKeyboardMarkup"}:
         rows = getattr(buttons, "rows", []) or []
@@ -199,6 +198,8 @@ class TelegramClient:
         self._stop = asyncio.Event()
         self._me = None
         self._runtime_context_factory = None
+        self._chat_locks: dict[int, asyncio.Lock] = {}
+        self._dispatch_tasks: set[asyncio.Task] = set()
 
     def add_event_handler(self, callback, event=None):
         self._handlers.append((callback, event))
@@ -230,7 +231,8 @@ class TelegramClient:
         self._token = bot_token or os.getenv("BOT_TOKEN")
         if not self._token:
             raise ValueError("BOT_TOKEN is required")
-        self._session = aiohttp.ClientSession()
+        connector = aiohttp.TCPConnector(limit=100, limit_per_host=30, ttl_dns_cache=300, enable_cleanup_closed=True)
+        self._session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=65))
         self._stop.clear()
         self._offset = 0
         self._me = await self._api("getMe")
@@ -239,26 +241,45 @@ class TelegramClient:
 
     async def disconnect(self):
         self._stop.set()
+        tasks = list(self._dispatch_tasks)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._dispatch_tasks.clear()
+        self._chat_locks.clear()
         if self._session and not self._session.closed:
             await self._session.close()
+
+    async def _dispatch_update_guarded(self, update):
+        chat_id = None
+        if "message" in update:
+            chat_id = (update["message"].get("chat") or {}).get("id")
+        elif "callback_query" in update:
+            query = update["callback_query"]
+            chat_id = ((query.get("message") or {}).get("chat") or {}).get("id") or (query.get("from") or {}).get("id")
+        if chat_id is None:
+            return await self._dispatch(update)
+        lock = self._chat_locks.setdefault(int(chat_id), asyncio.Lock())
+        async with lock:
+            return await self._dispatch(update)
+
+    def _track_dispatch(self, task: asyncio.Task) -> None:
+        self._dispatch_tasks.add(task)
+        task.add_done_callback(self._dispatch_tasks.discard)
 
     async def run_until_disconnected(self):
         while not self._stop.is_set():
             try:
-                updates = await self._api("getUpdates", offset=self._offset, timeout=30, allowed_updates=["message", "callback_query", "edited_message", "chat_member", "my_chat_member"])
+                updates = await self._api("getUpdates", offset=self._offset, timeout=50, allowed_updates=["message", "callback_query", "edited_message", "chat_member", "my_chat_member"])
                 for update in updates or []:
-                    self._offset = int(update.get("update_id", 0)) + 1
-                    try:
-                        await self._dispatch(update)
-                    except events.StopPropagation:
-                        continue
-                    except Exception:
-                        import logging
-                        logging.getLogger(__name__).exception("Telegram update handler failed")
+                    self._offset = max(self._offset, int(update.get("update_id", 0)) + 1)
+                    task = asyncio.create_task(self._dispatch_update_guarded(update))
+                    self._track_dispatch(task)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                await asyncio.sleep(2)
+                import logging
+                logging.getLogger(__name__).exception("Telegram polling failed")
+                await asyncio.sleep(1)
 
     async def _dispatch(self, update):
         if self._runtime_context_factory is not None:
@@ -295,7 +316,7 @@ class TelegramClient:
             raise RuntimeError("Telegram client is not started")
         clean = {k: _serialize_value(v) for k, v in params.items() if v is not None}
         url = f"https://api.telegram.org/bot{self._token}/{method}"
-        async with self._session.post(url, json=clean, timeout=aiohttp.ClientTimeout(total=60)) as response:
+        async with self._session.post(url, json=clean, timeout=aiohttp.ClientTimeout(total=65)) as response:
             payload = await response.json(content_type=None)
             if not payload.get("ok"):
                 raise RuntimeError(payload.get("description", f"Telegram API error: {method}"))
