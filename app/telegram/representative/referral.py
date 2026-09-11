@@ -16,7 +16,14 @@ async def allowed(event):
  user=await USERS.get_by_telegram_id(event.sender_id);return bool(user and not user.blocked)
 async def render(event):
  code=f"R{event.sender_id}";count=await SERVICE.stats(event.sender_id)
- return await event.edit("👥 **دعوت دوستان**\n\n"+f"کد دعوت شما: `{code}`\n\n👤 تعداد دعوت‌های ثبت‌شده: **{count}**\n\nلینک دعوت و پاداش مالی پس از تکمیل اتصال پرداخت فعال می‌شود.",buttons=[[Button.inline("🔄 بروزرسانی",PREFIX+b":refresh")],[Button.inline("🔙 فروشگاه",b"user:home")]])
+ me=await event.client.get_me();username=getattr(me,"username",None)
+ buttons=[]
+ if username:buttons.append([Button.url("📨 اشتراک‌گذاری لینک دعوت",f"https://t.me/{username}?start=ref_{event.sender_id}")])
+ buttons += [[Button.inline("🔄 بروزرسانی",PREFIX+b":refresh")],[Button.inline("🔙 فروشگاه",b"user:home")]]
+ text="👥 **دعوت دوستان**\n\n"+f"کد دعوت شما: `{code}`\n\n👤 تعداد دعوت‌های ثبت‌شده: **{count}**"
+ if username:text+=f"\n\n🔗 لینک دعوت آماده است؛ با آن کاربر جدید مستقیماً به ربات شما وارد می‌شود."
+ else:text+="\n\n⚠️ نام کاربری عمومی ربات تنظیم نشده است."
+ return await event.edit(text,buttons=buttons)
 async def render_callback(event):
  action=event.data[len(PREFIX):].decode(errors="ignore").lstrip(":")
  if action in ("","refresh"):return await render(event)
