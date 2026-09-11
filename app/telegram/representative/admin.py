@@ -16,9 +16,9 @@ async def dashboard_text():
 async def show_admin(event):
  if await _authorized(event): await event.respond(await dashboard_text(),buttons=ADMIN_MENU)
 async def admin_callback(event):
- if not await _authorized(event): return await event.answer("دسترسی مدیریت ندارید.",alert=True)
  data=event.data
  if not data or not data.startswith(PREFIX): return
+ if not await _authorized(event): return await event.answer("دسترسی مدیریت ندارید.",alert=True)
  child=(b"rep:plans:",b"rep:users:",b"rep:orders:",b"rep:services:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:",b"rep:links:",b"rep:settings:",b"rep:panel:",b"rep:support:")
  if data.startswith(child): return
  action=data[len(PREFIX):].decode(errors="ignore")
