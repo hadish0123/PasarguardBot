@@ -77,6 +77,7 @@ class _Event:
         self.client = client
         self._update = update
         self._callback = callback
+        self._answered = False
         if callback:
             cb = update["callback_query"]
             self.data = (cb.get("data") or "").encode("utf-8")
@@ -133,8 +134,9 @@ class _Event:
         return None
 
     async def answer(self, text: str | None = None, **kwargs):
-        if not self._callback or not self.id:
+        if not self._callback or not self.id or self._answered:
             return True
+        self._answered = True
         return await self.client._request(
             "answerCallbackQuery",
             {"callback_query_id": self.id, **({"text": text} if text else {})},
@@ -251,21 +253,40 @@ class TelegramClient:
     async def _dispatch(self, update):
         is_callback = "callback_query" in update
         event = _Event(self, update, callback=is_callback)
-        for callback, builder in list(self._handlers):
-            try:
-                if hasattr(builder, "matches") and not builder.matches(event):
-                    continue
-                if isinstance(builder, events.NewMessage) and builder.pattern:
-                    event.pattern_match = _PatternMatch(builder.pattern, event.raw_text)
-                await callback(event)
-            except Exception:
-                logger.exception("Telegram handler failed: %r", callback)
+        auto_ack = None
+        if is_callback:
+            async def acknowledge_quickly():
+                try:
+                    await asyncio.sleep(0.12)
+                    await event.answer()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.debug("Fast callback acknowledgement failed", exc_info=True)
+
+            auto_ack = asyncio.create_task(acknowledge_quickly(), name="telegram-fast-callback-ack")
+        try:
+            for callback, builder in list(self._handlers):
+                try:
+                    if hasattr(builder, "matches") and not builder.matches(event):
+                        continue
+                    if isinstance(builder, events.NewMessage) and builder.pattern:
+                        event.pattern_match = _PatternMatch(builder.pattern, event.raw_text)
+                    await callback(event)
+                except Exception:
+                    logger.exception("Telegram handler failed")
+        finally:
+            if auto_ack is not None and not auto_ack.done():
+                auto_ack.cancel()
+                try:
+                    await auto_ack
+                except asyncio.CancelledError:
+                    pass
 
     async def disconnect(self):
         self._stop.set()
         if self._session and not self._session.closed:
             await self._session.close()
-        return True
 
 
 __all__ = ["Button", "TelegramClient", "events"]
