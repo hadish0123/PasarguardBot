@@ -15,17 +15,27 @@ class RepresentativeRuntime:
         self.client = TelegramClient(
             f"tenant-{tenant_id}", settings.telegram_api_id, settings.telegram_api_hash
         )
+        self.is_running = False
 
     def register(self) -> None:
         self.client.add_event_handler(self._start, events.NewMessage(pattern=r"^/start$"))
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
-            await event.respond("🏪 **فروشگاه نمایندگی**\n\nخوش آمدید. از منوی زیر شروع کنید.")
+            await event.respond(
+                "🏪 **فروشگاه نمایندگی**\n\n"
+                "به فروشگاه خوش آمدید.\n"
+                "از این ربات می‌توانید سرویس خریداری کنید، سرویس‌های خود را ببینید و حساب کاربری را مدیریت کنید."
+            )
 
     async def start(self) -> None:
+        if self.is_running:
+            return
         self.register()
         await self.client.start(bot_token=self.bot_token)
+        self.is_running = True
 
     async def stop(self) -> None:
-        await self.client.disconnect()
+        if self.is_running:
+            await self.client.disconnect()
+        self.is_running = False
