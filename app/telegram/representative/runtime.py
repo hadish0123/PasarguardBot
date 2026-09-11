@@ -17,8 +17,9 @@ class RepresentativeRuntime:
   from app.telegram.representative.discounts import register as d
   from app.telegram.representative.sales import register as s
   from app.telegram.representative.texts import register as t
+  from app.telegram.representative.logs import register as l
   from app.telegram.representative.user import register as c
-  a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); c(self.client,self.tenant_id)
+  a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); c(self.client,self.tenant_id)
  async def _start(self,event):
   async with tenant_dispatch(self.tenant_id):
    if await self.dashboard.is_owner(event.sender_id):
