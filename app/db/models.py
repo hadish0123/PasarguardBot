@@ -16,6 +16,7 @@ class RegistrationStatus(StrEnum):
     PENDING = "pending"
     PROVISIONING = "provisioning"
     ACTIVE = "active"
+    FAILED = "failed"
     REJECTED = "rejected"
 
 
@@ -28,6 +29,13 @@ class RegistrationStep(StrEnum):
     PANEL_API_KEY = "panel_api_key"
     REVIEW = "review"
     COMPLETE = "complete"
+
+
+class TenantStatus(StrEnum):
+    PROVISIONING = "provisioning"
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    FAILED = "failed"
 
 
 class RepresentativeRegistration(Base):
@@ -45,5 +53,23 @@ class RepresentativeRegistration(Base):
     step: Mapped[str] = mapped_column(String(24), default=RegistrationStep.BRAND.value)
     status: Mapped[str] = mapped_column(String(24), default=RegistrationStatus.DRAFT.value, index=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TenantRecord(Base):
+    __tablename__ = "representative_tenants"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    registration_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    brand: Mapped[str] = mapped_column(String(120))
+    bot_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    bot_username: Mapped[str | None] = mapped_column(String(190), nullable=True)
+    bot_token_encrypted: Mapped[str] = mapped_column(Text)
+    panel_url: Mapped[str] = mapped_column(Text)
+    panel_username: Mapped[str | None] = mapped_column(String(190), nullable=True)
+    panel_api_key_encrypted: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default=TenantStatus.PROVISIONING.value, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
