@@ -64,12 +64,10 @@ async def _tenant_panel_code() -> int | None:
 
 
 async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
-    """Show only the already-provisioned representative panel for plan actions."""
     panel = await _tenant_panel()
     if not panel:
         await event.answer("❌ پنل نماینده پیدا نشد.", alert=True)
         return
-
     action = "ManagePlans" if manage else "AddPlans"
     title = "مدیریت پلن‌های پنل نماینده" if manage else "ساخت پلن برای پنل نماینده"
     buttons = [[Button.inline(f"{'✅' if panel.enable == 1 else '❌'} {panel.name}", data=f"{action}_{panel.code}")]]
@@ -196,6 +194,18 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
             await event.answer("⛔️ فقط پنل متصل به همین نماینده قابل مدیریت است.", alert=True)
             raise events.StopPropagation
         await plan_inline_callback(event)
+        raise events.StopPropagation
+
+    if data.startswith("BuyVPN_"):
+        selected_code = data.removeprefix("BuyVPN_")
+        tenant_code = await _tenant_panel_code()
+        if tenant_code is None or str(tenant_code) != selected_code:
+            await event.answer("⛔️ دسترسی به این پنل برای این نماینده مجاز نیست.", alert=True)
+            raise events.StopPropagation
+        return
+
+    if data in {"addpanel", "add_panel", "panel_add", "register_panel", "delete_panel", "deletePanel"} or data.startswith(("addpanel:", "add_panel:", "panel_add:", "register_panel:", "delete_panel:", "deletePanel:")):
+        await event.answer("⛔ ثبت یا حذف پنل در ربات نماینده مجاز نیست.", alert=True)
         raise events.StopPropagation
 
     if data == "rep_keyboard_page:1":
