@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from app.core.exceptions import ValidationError
 
@@ -36,9 +37,12 @@ class RegistrationService:
     def normalize_panel_url(value: str) -> str:
         value = value.strip().rstrip("/")
         if value.endswith("/dashboard"):
-            value = value[:-9]
+            value = value[:-9].rstrip("/")
         if not value.startswith(("http://", "https://")):
             value = "https://" + value
         if " " in value:
+            raise ValidationError("آدرس پنل معتبر نیست.")
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValidationError("آدرس پنل معتبر نیست.")
         return value.rstrip("/")
