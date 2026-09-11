@@ -16,15 +16,17 @@ from app.services.panels.settings import (
     toggle_custom_buy_enabled,
     toggle_panel_sales_setting,
 )
+from app.telegram.admin.discounts.callbacks import callback_discount_admin
 from app.telegram.admin.discounts.messages import message_handler_discount_admin
+from app.telegram.admin.logs.callbacks import callback_log_admin
+from app.telegram.admin.logs.keyboards import main_menu_buttons as log_main_menu_buttons
 from app.telegram.admin.logs.messages import message_handler_log_admin
 from app.telegram.admin.manage_user.messages import msg_manage_user_admin
 from app.telegram.admin.panels.callbacks import panel_admin_callback_handler
 from app.telegram.admin.panels.service import build_panel_summary_block, display_panels
 from app.telegram.keyboards.customization import create_keyboard_buttons_admin_buttons
-from app.telegram.keyboards.home import bhome_buttons
 from app.telegram.shared.url_presets import format_admin_links_message, get_bot_username
-from app.telegram.state import get_step, set_step
+from app.telegram.state import set_step
 
 MODULE_NAME = "admin.representative_panel"
 MODULE_ENABLED = True
@@ -116,14 +118,16 @@ async def _rep_menu_handler(event: Message):
     elif msg == "⚙️ تنظیمات فروش":
         await _show_sales_menu(event)
     elif msg == "🎟 کدهای تخفیف":
-        await event.respond("🎟 **مدیریت کدهای تخفیف**", buttons=[[Button.inline("باز کردن مدیریت کد تخفیف", data="discounts_open")], [Button.inline("🔙 بازگشت", data="back_to_admin_panel")]], parse_mode="md")
+        from app.telegram.admin.discounts.service import show_main_menu
+        await show_main_menu(event)
+        await set_step(event.sender_id, "takhfif_select")
     elif msg == "👥 کاربران":
         await event.respond("👥 لطفاً آیدی عددی کاربر را ارسال کنید:", buttons=[[Button.text("🔙 بازگشت به پنل", resize=True)]])
         await set_step(event.sender_id, "MToUser")
     elif msg == "📝 متن‌ها و دکمه‌ها":
-        await event.respond("📝 **مدیریت دکمه‌های کاربر**\n\nاز این بخش متن و ظاهر دکمه‌های منوی کاربر را تنظیم کنید.", buttons=await create_keyboard_buttons_admin_buttons(1), parse_mode="md")
+        await event.respond("📝 **دکمه‌های منوی کاربر**\n\nمتن و ظاهر دکمه‌ها از همین بخش قابل تنظیم است.", buttons=await create_keyboard_buttons_admin_buttons(1), parse_mode="md")
     elif msg == "📝 مدیریت لاگ‌ها":
-        await event.respond("📝 **مدیریت لاگ‌ها**\n\nنوع لاگ و مقصد ارسال را انتخاب کنید.", buttons=[[Button.inline("⚙️ باز کردن مدیریت لاگ‌ها", data="rep_logs_open")], [Button.inline("🔙 بازگشت", data="back_to_admin_panel")]], parse_mode="md")
+        await event.respond("📝 **مدیریت لاگ‌ها**\n\nنوع لاگ و مقصد ارسال را انتخاب کنید.", buttons=log_main_menu_buttons(), parse_mode="md")
     elif msg == "🔗 لینک های آماده":
         bot_username = await get_bot_username(Kenzo)
         await event.respond(format_admin_links_message(bot_username), buttons=[[Button.inline("🔙 بازگشت", data="back_to_admin_panel")]], parse_mode="md")
@@ -144,11 +148,10 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
             await event.answer("❌ پنل نماینده پیدا نشد.", alert=True)
             return
         key = data.split(":", 1)[1]
+        settings = feature_settings(panel)
         if key == "custom":
-            settings = feature_settings(panel)
             toggle_custom_buy_enabled(settings)
         elif key in {"shop", "reseller"}:
-            settings = feature_settings(panel)
             toggle_panel_sales_setting(settings, "shop_enabled" if key == "shop" else "reseller_enabled")
         else:
             return
@@ -161,18 +164,14 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         await event.edit("📝 **دکمه‌های منوی کاربر**", buttons=await create_keyboard_buttons_admin_buttons(1), parse_mode="md")
         raise events.StopPropagation
 
-    if data == "discounts_open":
-        await event.answer()
-        await message_handler_discount_admin(event)
+    if data.startswith("discount") or data.startswith("EditDisc") or data in {"discounts", "discount_info_back"}:
+        await callback_discount_admin(event)
         raise events.StopPropagation
 
-    if data == "rep_logs_open":
-        await event.answer()
-        await message_handler_log_admin(event)
+    if data.startswith("log_") or data in {"log_management", "log_show_status", "log_set_all", "back_to_log_management"}:
+        await callback_log_admin(event)
         raise events.StopPropagation
 
-    # Reuse the mature panel/keyboard callback implementation, but never allow
-    # panel creation/deletion entry points from a representative runtime.
     if data.startswith(("panel_", "keyboard_", "keyboard_page", "edit_keyboard", "plan_", "Plan", "ManagePlans_", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu")):
         blocked = ("addpanel", "add_panel", "panel_add", "delete_panel", "deletePanel")
         if any(token.lower() in data.lower() for token in blocked):
@@ -185,8 +184,6 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
 def register(client):
     client.add_event_handler(_rep_menu_handler, events.NewMessage(incoming=True, func=_rep_admin))
     client.add_event_handler(_rep_callback_handler, events.CallbackQuery(func=_rep_admin))
-
-    # Existing mature flows are reused inside the representative tenant.
     client.add_event_handler(msg_manage_user_admin, events.NewMessage(incoming=True, func=_rep_admin))
     client.add_event_handler(message_handler_discount_admin, events.NewMessage(incoming=True, func=_rep_admin))
     client.add_event_handler(message_handler_log_admin, events.NewMessage(incoming=True, func=_rep_admin))
