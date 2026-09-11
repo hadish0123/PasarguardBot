@@ -16,6 +16,7 @@ from app.db.crud.keyboards import get_button_text
 from app.db.crud.panels import PanelsManager
 from app.db.crud.settings import SettingsManager
 from app.logger import get_logger
+from app.runtime.context import is_representative_runtime
 from app.services.panels.nodes import filter_nodes_by_plan_type
 from app.services.panels.settings import (
     calculate_custom_buy_price_from_settings,
@@ -34,20 +35,10 @@ from app.telegram.keyboards.home import bhome_buttons
 from app.telegram.shared.guards.channel_gate import ensure_channel_membership, extract_start_param
 from app.telegram.shared.keyboards.panel_buttons import build_panel_display_button
 from app.telegram.shared.utils.maintenance import bot_is_offline
-from app.telegram.shared.utils.username import (
-    is_valid_username,
-)
+from app.telegram.shared.utils.username import is_valid_username
 from app.telegram.state import clear_user, get_data, get_data_many, get_step, set_data, set_data_many, set_step
-from app.telegram.user.shop.callbacks import (
-    buy_discount_code_filter,
-    buy_username_message_filter,
-)
-from app.telegram.user.shop.custom_buy import (
-    CUSTOM_PLAN_ID,
-    format_gb_value,
-    validate_custom_days,
-    validate_custom_gb,
-)
+from app.telegram.user.shop.callbacks import buy_discount_code_filter, buy_username_message_filter
+from app.telegram.user.shop.custom_buy import CUSTOM_PLAN_ID, format_gb_value, validate_custom_days, validate_custom_gb
 from app.telegram.user.shop.helpers import (
     _buy_intro_text,
     _buy_username_context,
@@ -72,12 +63,22 @@ async def buy_service_handler(event: Message):
     user_id = event.sender_id
     lang = await _user_lang(user_id)
     setting = await SettingsManager().get_settings()
-    if setting and not setting.sale_mode:
+    # The central sale switch controls the central shop. A representative bot
+    # is isolated to its own tenant/panel and must not inherit a disabled
+    # central switch, otherwise every newly provisioned representative bot is
+    # permanently unable to sell configurations.
+    if not is_representative_runtime() and setting and not setting.sale_mode:
         await event.respond("⛔️ فروش توسط ادمین بسته است.", buttons=await bhome_buttons(user_id, lang))
         raise events.StopPropagation
 
     panel_manager = PanelsManager()
     panels = await panel_manager.get_available_panels()
+    if not panels:
+        await event.respond(
+            "❌ در حال حاضر هیچ پنل فعالی برای فروش وجود ندارد.",
+            buttons=await bhome_buttons(user_id, lang),
+        )
+        raise events.StopPropagation
 
     remove_keyboard_msg = await event.respond("⏳", buttons=Button.clear())
     await remove_keyboard_msg.delete()
@@ -130,17 +131,11 @@ async def custom_buy_input_handler(event: Message):
         if error:
             await _edit(error)
             raise events.StopPropagation
-        await set_data_many(
-            user_id,
-            {
-                "gig": value,
-                "selected_plan_id": CUSTOM_PLAN_ID,
-            },
-        )
+        await set_data_many(user_id, {"gig": value, "selected_plan_id": CUSTOM_PLAN_ID})
         await set_step(user_id, "custom_buy_enter_days")
         days_prompt = await _format_bot_text(
             key="custom_buy_enter_days_message",
-            default=("✅ حجم `{gb}` گیگ ثبت شد.\n\n⏰ تعداد روز را وارد کنید (بین `{min_days}` تا `{max_days}`):"),
+            default="✅ حجم `{gb}` گیگ ثبت شد.\n\n⏰ تعداد روز را وارد کنید (بین `{min_days}` تا `{max_days}`):",
             lang=await _user_lang(user_id),
             gb=format_gb_value(value),
             min_days=settings["min_days"],
@@ -173,23 +168,12 @@ async def custom_buy_input_handler(event: Message):
         await set_step(user_id, "enter_username")
         username_message = await get_bot_text(
             key="enter_username_message",
-            default=(
-                "🔸 یک نام برای کانفیگ وارد کنید:\n"
-                "^qc^نام کاربری باید بین ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، اعداد و زیرخط باشد.\n"
-                "نمونه:\nAmir_Kenzo123\nNeda\nNeda123\nNeda_123^qc^"
-            ),
+            default="🔸 یک نام برای کانفیگ وارد کنید:\n^qc^نام کاربری باید بین ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، اعداد و زیرخط باشد.^qc^",
             lang=await _user_lang(user_id),
         )
         await _edit(
-            f"**🧩 خرید دلخواه**\n"
-            f"📥 حجم: `{format_gb_value(float(gig))}` گیگ\n"
-            f"⏰ مدت: `{days}` روز\n"
-            f"💸 قیمت: `{price:,}` تومان\n\n"
-            f"{username_message}",
-            buttons=[
-                [await buy_default_username_button(b"generate_username")],
-                [await buy_cancel_button(b"DataCancel")],
-            ],
+            f"**🧩 خرید دلخواه**\n📥 حجم: `{format_gb_value(float(gig))}` گیگ\n⏰ مدت: `{days}` روز\n💸 قیمت: `{price:,}` تومان\n\n{username_message}",
+            buttons=[[await buy_default_username_button(b"generate_username")], [await buy_cancel_button(b"DataCancel")]],
         )
         raise events.StopPropagation
 
@@ -198,22 +182,13 @@ async def custom_buy_input_handler(event: Message):
 async def buy_username_message_handler(event: Message):
     username = (event.message.message or "").strip()
     panel, _gig, _plan = await _buy_username_context(event.sender_id)
-    retry_buttons = [
-        [await buy_default_username_button(b"generate_username")],
-        [await buy_cancel_button(b"DataCancel")],
-    ]
+    retry_buttons = [[await buy_default_username_button(b"generate_username")], [await buy_cancel_button(b"DataCancel")]]
     if not is_valid_username(username):
-        await event.respond(
-            "❌ نام کاربری باید بین ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، اعداد و زیرخط باشد.",
-            buttons=retry_buttons,
-        )
+        await event.respond("❌ نام کاربری باید بین ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، اعداد و زیرخط باشد.", buttons=retry_buttons)
         raise events.StopPropagation
     try:
         await PasarguardAPI(panel.base_url).get_user_by_username(username=username, token=panel.cookie)
-        await event.respond(
-            "❌ نام کاربری توسط شخص دیگری ساخته شده\n\n^q^لطفا نام کاربری دیگری ارسال کنید یا اینکه روی دکمه زیر کلیک کنید تا اسم رندوم ساخته شود^q^",
-            buttons=retry_buttons,
-        )
+        await event.respond("❌ نام کاربری توسط شخص دیگری ساخته شده\n\nلطفاً نام دیگری ارسال کنید یا از نام تصادفی استفاده کنید.", buttons=retry_buttons)
         raise events.StopPropagation
     except HTTPStatusError as e:
         if e.response.status_code != 404:
@@ -247,35 +222,26 @@ async def buy_discount_code_handler(event: Message):
         await clear_user(event.sender_id)
         await set_step(event.sender_id, "home")
         raise events.StopPropagation
-    new_amount = int(plan.price - (plan.price * (res.discount_percentage / 100)))
 
+    new_amount = int(plan.price - (plan.price * (res.discount_percentage / 100)))
     try:
         api = PasarguardAPI(base_url=panel.base_url)
         nodes_stats = await api.get_nodes(token=panel.cookie)
         filtered_nodes = filter_nodes_by_plan_type(nodes_stats.nodes, plan, panel)
         locations = " ⌁ ".join([f"{node.name}" for node in filtered_nodes]) or " "
     except httpx.HTTPStatusError as e:
-        locations = (
-            "🇺🇸 🇹🇷 🇫🇮 🇩🇪 🇦🇲 " if e.response.status_code == 403 else "❌ خطا در دریافت نودها، لطفاً دوباره تلاش کنید."
-        )
+        locations = "🇺🇸 🇹🇷 🇫🇮 🇩🇪 🇦🇲 " if e.response.status_code == 403 else "❌ خطا در دریافت نودها، لطفاً دوباره تلاش کنید."
 
     ip_limit_text = format_ip_limit(getattr(plan, "ip_limit", 0))
-    volume_text = convert_storage(
-        float(gig), getattr(plan, "plan_type", None), getattr(plan, "data_limit_reset_strategy", None)
-    )
+    volume_text = convert_storage(float(gig), getattr(plan, "plan_type", None), getattr(plan, "data_limit_reset_strategy", None))
     confirm_text_template = await get_bot_text(
         key="config_purchase_discount_confirm",
         default=(
             "**ساخت کانفیگ اختصاصی V2Ray با مشخصات زیر را تأیید می‌کنید؟**\n\n"
-            "**▪️ حجم سرویس :** {volume}\n"
-            "**⏰ مدت زمان :** {duration} روز\n"
-            "**▫️نام کانفیگ :** `{config_name}`\n"
-            "**▫️نوع کانفیگ :** {config_type}\n"
+            "**▪️ حجم سرویس :** {volume}\n**⏰ مدت زمان :** {duration} روز\n"
+            "**▫️نام کانفیگ :** `{config_name}`\n**▫️نوع کانفیگ :** {config_type}\n"
             "**▫️ لوکیشن های موجودسرویس :** \n**^qc^{locations}^qc^**\n"
-            "**🔌 محدودیت کاربر :** {user_limit}\n"
-            "**💸 مبلغ قبل:** `{original_price}` **مبلغ جدید:** `{new_price}`\n"
-            "❗️ نکته؛\n"
-            "(پس از خرید؛ امکان افزایش حجم وجود دارد و همچنین مقدار باقیمانده حجم و روز از بخش سرویس‌های من قابل مشاهده است)"
+            "**🔌 محدودیت کاربر :** {user_limit}\n**💸 مبلغ قبل:** `{original_price}` **مبلغ جدید:** `{new_price}`"
         ),
         lang="fa",
     )
@@ -289,10 +255,7 @@ async def buy_discount_code_handler(event: Message):
         .replace("{original_price}", f"{int(plan.price):,}")
         .replace("{new_price}", f"{int(new_amount):,}")
     )
-    confirm_buttons = [
-        [Button.inline("🎉 کد تخفیف اعمال شد", "none")],
-        *(await build_buy_confirm_button_rows(confirm_data="Confirm_buy", with_discount=False)),
-    ]
+    confirm_buttons = [[Button.inline("🎉 کد تخفیف اعمال شد", "none")], *(await build_buy_confirm_button_rows(confirm_data="Confirm_buy", with_discount=False))]
     await event.respond(confirm_text, buttons=confirm_buttons, link_preview=False)
     await set_data(event.sender_id, "codetakhfif", res.code)
     await set_data(event.sender_id, "codetakhfif_newprice", new_amount)
@@ -340,8 +303,7 @@ async def account_discount_message_filter(event: Message) -> bool:
 
 def register(client):
     client.add_event_handler(buy_service_handler, events.NewMessage(incoming=True, func=buy_service_filter))
+    client.add_event_handler(buy_username_message_handler, events.NewMessage(incoming=True, func=buy_username_message_filter))
     client.add_event_handler(custom_buy_input_handler, events.NewMessage(incoming=True, func=custom_buy_input_filter))
-    client.add_event_handler(
-        buy_username_message_handler, events.NewMessage(incoming=True, func=buy_username_message_filter)
-    )
     client.add_event_handler(buy_discount_code_handler, events.NewMessage(incoming=True, func=buy_discount_code_filter))
+    client.add_event_handler(account_discount_message_handler, events.NewMessage(incoming=True, func=account_discount_message_filter))
