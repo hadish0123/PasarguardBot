@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import time
 import uuid
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -49,6 +49,16 @@ class PasarguardClient:
             "Content-Type": "application/json",
         }
 
+    def _absolute_subscription_url(self, value: object) -> str | None:
+        if value is None:
+            return None
+        subscription = str(value).strip()
+        if not subscription:
+            return None
+        # PasarGuard commonly returns subscription_url as a relative path,
+        # e.g. /sub/<token>. The bot must expose a directly usable URL.
+        return urljoin(f"{self.base_url}/", subscription)
+
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
             async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
@@ -79,9 +89,6 @@ class PasarguardClient:
         return True
 
     async def client_count(self) -> int:
-        # Current PasarGuard exposes the user collection at /api/users.
-        # /api/user/s belongs to older/incompatible API layouts and can return
-        # 405 Method Not Allowed on current panels.
         response = await self._request("GET", "/api/users", params={"limit": 1})
         if not response.is_success:
             detail = response.text.strip()[:500]
@@ -101,8 +108,6 @@ class PasarguardClient:
         raise ExternalServiceError("ساختار پاسخ تعداد کلاینت‌های پاسارگارد نامعتبر است.")
 
     async def _first_user_template_id(self) -> int | None:
-        # Current RBAC-aware panels expose a simple template list for API
-        # clients/operators. It is optional because direct user creation works.
         for path in ("/api/user_templates/simple", "/api/user_templates"):
             response = await self._request("GET", path, params={"limit": 100})
             if response.status_code == 404:
@@ -155,10 +160,12 @@ class PasarguardClient:
             raise ExternalServiceError("پاسخ ساخت کلاینت تستی پاسارگارد نامعتبر است.")
 
         service_id = data.get("id") or data.get("user_id") or data.get("username")
-        subscription_url = data.get("subscription_url") or data.get("subscriptionUrl")
+        subscription_url = self._absolute_subscription_url(
+            data.get("subscription_url") or data.get("subscriptionUrl")
+        )
         if service_id is None:
             raise ExternalServiceError("پاسارگارد کلاینت تستی را ساخت اما شناسه آن را برنگرداند.")
-        return ProvisionedUser(str(service_id), str(subscription_url) if subscription_url else None)
+        return ProvisionedUser(str(service_id), subscription_url)
 
     async def probe(self) -> PanelProbe:
         await self.health()
@@ -183,7 +190,9 @@ class PasarguardClient:
         if not isinstance(data, dict):
             raise ExternalServiceError("پاسخ پاسارگارد برای کاربر ساختاری نامعتبر دارد.")
         service_id = data.get("id") or data.get("user_id") or data.get("username")
-        subscription_url = data.get("subscription_url") or data.get("subscriptionUrl")
+        subscription_url = self._absolute_subscription_url(
+            data.get("subscription_url") or data.get("subscriptionUrl")
+        )
         if service_id is None:
             raise ExternalServiceError("پاسخ پاسارگارد شناسه سرویس ایجادشده را برنگرداند.")
-        return ProvisionedUser(str(service_id), str(subscription_url) if subscription_url else None)
+        return ProvisionedUser(str(service_id), subscription_url)
