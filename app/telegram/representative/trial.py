@@ -5,7 +5,7 @@ from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_users import SERVICE as USERS
 from app.services.trial import SERVICE
-PREFIX=b"user:trial:"
+PREFIX=b"user:trial"
 def register(client,tenant_id=None):
  async def callback(event):
   async with tenant_dispatch(tenant_id):
@@ -16,7 +16,7 @@ async def allowed(event):
  if not event.is_private or not get_tenant(): return False
  user=await USERS.get_by_telegram_id(event.sender_id); return bool(user and not user.blocked)
 async def render_callback(event):
- action=event.data[len(PREFIX):].decode(errors="ignore")
+ action=event.data[len(PREFIX):].decode(errors="ignore").lstrip(":")
  if action in ("","claim"):
   try:
    plan=await SERVICE.claim(event.sender_id)
