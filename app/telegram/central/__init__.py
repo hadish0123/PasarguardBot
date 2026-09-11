@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from telethon import Button, events
 
+from app.db.models import RegistrationStatus
 from app.services.registration_store import RegistrationStore
 from app.telegram.central.registration import register_registration_handlers
 
@@ -60,10 +61,13 @@ async def register(event):
         record = await STORE.create_or_resume_draft(event.sender_id)
     except Exception:
         await event.edit(
-            "❌ در ایجاد درخواست مشکلی پیش آمد.\n\n"
-            "لطفاً چند لحظه بعد دوباره تلاش کنید.",
+            "❌ در ایجاد درخواست مشکلی پیش آمد.\n\nلطفاً چند لحظه بعد دوباره تلاش کنید.",
             buttons=back_button(),
         )
+        return
+
+    if record.status != RegistrationStatus.DRAFT.value:
+        await event.edit(registration_status_text(record), buttons=[[Button.inline("🔙 بازگشت", HOME)]])
         return
 
     await event.edit(
@@ -84,9 +88,7 @@ async def track_input(event):
         return
     await event.answer()
     await event.edit(
-        "🔎 **پیگیری درخواست**\n\n"
-        "کد پیگیری را ارسال کنید.\n"
-        "مثال: `PG-A1B2C3D4`",
+        "🔎 **پیگیری درخواست**\n\nکد پیگیری را ارسال کنید.\nمثال: `PG-A1B2C3D4`",
         buttons=[[Button.inline("❌ لغو", CANCEL)]],
     )
 
@@ -122,11 +124,7 @@ async def text_router(event):
             await event.respond("❌ پیگیری درخواست در حال حاضر در دسترس نیست.", buttons=menu())
             return
         if record is None:
-            await event.respond(
-                "❌ کد پیگیری پیدا نشد.\n\n"
-                "کد را دقیقاً مانند نمونه ارسال کنید یا از منوی اصلی دوباره تلاش کنید.",
-                buttons=menu(),
-            )
+            await event.respond("❌ کد پیگیری پیدا نشد.\n\nکد را دقیقاً مانند نمونه ارسال کنید یا از منوی اصلی دوباره تلاش کنید.", buttons=menu())
             return
         await event.respond(registration_status_text(record), buttons=menu())
 
@@ -148,16 +146,12 @@ def home_text() -> str:
 
 def registration_status_text(record) -> str:
     labels = {
-        "draft": "📝 پیش‌نویس — ثبت اطلاعات هنوز کامل نشده است.",
-        "pending": "⏳ در انتظار بررسی — درخواست ثبت شده و منتظر تأیید است.",
-        "provisioning": "⚙️ در حال راه‌اندازی — منابع ربات نمایندگی در حال آماده‌سازی است.",
-        "active": "✅ فعال — ربات نمایندگی شما فعال شده است.",
-        "rejected": "❌ رد شده — درخواست نیاز به اصلاح یا ثبت مجدد دارد.",
+        RegistrationStatus.DRAFT.value: "📝 پیش‌نویس — ثبت اطلاعات هنوز کامل نشده است.",
+        RegistrationStatus.PENDING.value: "⏳ در انتظار بررسی — درخواست ثبت شده و منتظر تأیید است.",
+        RegistrationStatus.PROVISIONING.value: "⚙️ در حال راه‌اندازی — منابع ربات نمایندگی در حال آماده‌سازی است.",
+        RegistrationStatus.ACTIVE.value: "✅ فعال — ربات نمایندگی شما فعال شده است.",
+        RegistrationStatus.REJECTED.value: "❌ رد شده — درخواست نیاز به اصلاح یا ثبت مجدد دارد.",
     }
     reason = f"\n\n📌 دلیل: {record.rejection_reason}" if record.rejection_reason else ""
     brand = f"\n🏷 برند: {record.brand}" if record.brand else ""
-    return (
-        "🔎 **وضعیت درخواست نمایندگی**\n\n"
-        f"🆔 کد: `{record.tracking_code}`{brand}\n"
-        f"\n{labels.get(record.status, '❔ وضعیت نامشخص')}{reason}"
-    )
+    return "🔎 **وضعیت درخواست نمایندگی**\n\n" f"🆔 کد: `{record.tracking_code}`{brand}\n" f"\n{labels.get(record.status, '❔ وضعیت نامشخص')}{reason}"
