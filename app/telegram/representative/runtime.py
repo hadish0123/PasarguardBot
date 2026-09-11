@@ -5,6 +5,7 @@ from telethon import TelegramClient, events
 from app.core.config import settings
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_dashboard import RepresentativeDashboardService
+from app.services.representative_users import SERVICE as USER_SERVICE
 
 
 class RepresentativeRuntime:
@@ -21,8 +22,10 @@ class RepresentativeRuntime:
         self.client.add_event_handler(self._start, events.NewMessage(pattern=r"^/start$"))
         from app.telegram.representative.admin import register as register_admin
         from app.telegram.representative.plans import register as register_plans
+        from app.telegram.representative.users import register as register_users
         register_admin(self.client, self.tenant_id)
         register_plans(self.client, self.tenant_id)
+        register_users(self.client, self.tenant_id)
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
@@ -30,15 +33,21 @@ class RepresentativeRuntime:
                 from app.telegram.representative.admin import dashboard_text, ADMIN_MENU
                 await event.respond(await dashboard_text(), buttons=ADMIN_MENU)
                 return
+            user = await USER_SERVICE.upsert_from_sender(await event.get_sender())
+            if user.blocked:
+                await event.respond("🚫 دسترسی شما به این فروشگاه مسدود شده است.\n\nدر صورت اشتباه با پشتیبانی تماس بگیرید.")
+                return
             from app.telegram.representative.user import USER_MENU
             await event.respond("🏪 **فروشگاه**\n\nبه فروشگاه نمایندگی خوش آمدید. از گزینه‌های زیر شروع کنید.", buttons=USER_MENU)
 
     async def start(self) -> None:
-        if self.is_running: return
+        if self.is_running:
+            return
         self.register()
         await self.client.start(bot_token=self.bot_token)
         self.is_running = True
 
     async def stop(self) -> None:
-        if self.is_running: await self.client.disconnect()
+        if self.is_running:
+            await self.client.disconnect()
         self.is_running = False
