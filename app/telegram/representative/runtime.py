@@ -31,7 +31,8 @@ class RepresentativeRuntime:
         from app.telegram.representative.trial import register as tr
         from app.telegram.representative.referral import register as rf
         from app.telegram.representative.support import register as sp
-        a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); co(self.client,self.tenant_id); n(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id); rf(self.client,self.tenant_id); sp(self.client,self.tenant_id)
+        from app.telegram.representative.support_admin import register as spa
+        a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); co(self.client,self.tenant_id); n(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id); rf(self.client,self.tenant_id); sp(self.client,self.tenant_id); spa(self.client,self.tenant_id)
     async def _start(self,event):
         async with tenant_dispatch(self.tenant_id):
             if await self.dashboard.is_owner(event.sender_id):
@@ -43,11 +44,8 @@ class RepresentativeRuntime:
             if ref_arg:
                 ref_arg=ref_arg.strip()
                 if ref_arg.startswith("ref_"):
-                    try:
-                        inviter_id=int(ref_arg[4:])
-                        await REFERRAL_SERVICE.attach(inviter_id,event.sender_id)
-                    except (ValueError,LookupError):
-                        pass
+                    try: await REFERRAL_SERVICE.attach(int(ref_arg[4:]),event.sender_id)
+                    except (ValueError,LookupError): pass
             from app.telegram.representative.navigation import customer_menu
             await event.respond(await TEXT_SERVICE.get("welcome"),buttons=await customer_menu())
     async def start(self):
