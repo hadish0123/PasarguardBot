@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from telethon import Button, events
-
 from app.core.ids import REP_DISCOUNTS, REP_HOME, REP_LINKS, REP_LOGS, REP_ORDERS, REP_PANEL, REP_PLANS, REP_SALES, REP_SETTINGS, REP_TEXTS, REP_USERS
 from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
@@ -25,9 +24,8 @@ def register(client, tenant_id=None):
     async def callback(event):
         async with tenant_dispatch(tenant_id):
             await admin_callback(event)
-
     client.add_event_handler(show_admin, events.NewMessage(pattern=r"^/admin$"))
-    client.add_event_handler(callback, events.CallbackQuery(data=PREFIX))
+    client.add_event_handler(callback, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
 
 
 async def _authorized(event):
@@ -48,44 +46,41 @@ async def show_admin(event):
 async def admin_callback(event):
     if not await _authorized(event):
         return await event.answer("دسترسی مدیریت ندارید.", alert=True)
-    if event.data.startswith((
-        b"rep:plans:", b"rep:users:", b"rep:orders:", b"rep:discounts:",
-        b"rep:sales:", b"rep:texts:", b"rep:logs:", b"rep:links:",
-        b"rep:settings:", b"rep:panel:",
-    )):
+    data = event.data
+    child_prefixes = (b"rep:plans:", b"rep:users:", b"rep:orders:", b"rep:discounts:", b"rep:sales:", b"rep:texts:", b"rep:logs:", b"rep:links:", b"rep:settings:", b"rep:panel:")
+    if data.startswith(child_prefixes):
         return
-    action = event.data[len(PREFIX):].decode(errors="ignore")
+    action = data[len(PREFIX):].decode(errors="ignore")
     if action == REP_HOME:
-        await event.edit(await dashboard_text(), buttons=ADMIN_MENU)
-        return await event.answer()
+        await event.edit(await dashboard_text(), buttons=ADMIN_MENU); return await event.answer()
     if action == REP_PLANS:
         from app.telegram.representative.plans import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_USERS:
         from app.telegram.representative.users import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_ORDERS:
         from app.telegram.representative.orders import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_DISCOUNTS:
         from app.telegram.representative.discounts import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_SALES:
         from app.telegram.representative.sales import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_PANEL:
         from app.telegram.representative.panel import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_TEXTS:
         from app.telegram.representative.texts import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_LOGS:
         from app.telegram.representative.logs import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_LINKS:
         from app.telegram.representative.links import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
     if action == REP_SETTINGS:
         from app.telegram.representative.settings import render
-        t, b = await render(); await event.edit(t, buttons=b); return await event.answer()
-    await event.answer("گزینه نامعتبر است.", alert=True)
+        t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
+    await event.answer("گزینه نامعتبر است.",alert=True)
