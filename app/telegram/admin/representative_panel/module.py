@@ -21,6 +21,7 @@ from app.telegram.admin.discounts.messages import message_handler_discount_admin
 from app.telegram.admin.logs.callbacks import callback_log_admin
 from app.telegram.admin.logs.keyboards import main_menu_buttons as log_main_menu_buttons
 from app.telegram.admin.logs.messages import message_handler_log_admin
+from app.telegram.admin.manage_user.callbacks import callback_manage_user_admin
 from app.telegram.admin.manage_user.messages import msg_manage_user_admin
 from app.telegram.admin.panels.callbacks import panel_admin_callback_handler
 from app.telegram.admin.panels.service import build_panel_summary_block, display_panels
@@ -171,6 +172,10 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
 
     if data.startswith("log_") or data in {"log_management", "log_show_status", "log_set_all", "back_to_log_management"}:
         await callback_log_admin(event)
+        raise events.StopPropagation
+
+    if data.startswith(("AdminReseller_", "MToUser_", "AdminConfig", "UserInfo:", "CreateConfigFor:", "BulkDeleteConfigs:", "confirm_phone_", "bansup_", "unbansup_", "sendm_")):
+        await callback_manage_user_admin(event)
         raise events.StopPropagation
 
     if data.startswith(("Plan", "ManagePlans_", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu", "plan_", "duration_")):
