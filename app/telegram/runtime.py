@@ -28,11 +28,11 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     register_central_admin_handlers(client)
     await client.start(bot_token=settings.central_bot_token)
 
-    # Railway/container restarts must not silently leave active representative
-    # tenants offline. Restore only tenants persisted as ACTIVE and keep every
-    # bot isolated in its own RepresentativeRuntime.
+    # Never start a representative runtime with the central bot token. A tenant
+    # accidentally registered with BOT_TOKEN would otherwise create a second
+    # getUpdates consumer and Telegram would terminate one of the connections.
     tenant_service = TenantService()
-    for tenant in await tenant_service.list_runtime_tenants():
+    for tenant in await tenant_service.list_runtime_tenants(settings.central_bot_token):
         try:
             await registry.start(tenant.id, tenant.bot_token)
             logger.info("representative runtime restored: %s", tenant.id)
