@@ -24,10 +24,12 @@ class RepresentativeRuntime:
         from app.telegram.representative.plans import register as register_plans
         from app.telegram.representative.users import register as register_users
         from app.telegram.representative.orders import register as register_orders
+        from app.telegram.representative.user import register as register_customer
         register_admin(self.client, self.tenant_id)
         register_plans(self.client, self.tenant_id)
         register_users(self.client, self.tenant_id)
         register_orders(self.client, self.tenant_id)
+        register_customer(self.client, self.tenant_id)
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
