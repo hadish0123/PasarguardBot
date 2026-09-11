@@ -5,11 +5,10 @@ from telethon import Button, events
 from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.db.models import RegistrationStep, RegistrationStatus, RepresentativeRegistration
-from app.db.session import SessionFactory
 from app.services.pasarguard import PasarguardClient
 from app.services.registration import RegistrationService
 from app.services.registration_store import RegistrationStore
-from app.services.secrets import secret_box
+from app.services.secrets import get_secret_box
 from app.services.telegram_bot import TelegramBotVerifier
 
 
@@ -95,7 +94,7 @@ async def process_step(record: RepresentativeRegistration, step: RegistrationSte
         await STORE.update(
             record.id,
             bot_id=int(bot["id"]),
-            bot_token_encrypted=secret_box.encrypt(value),
+            bot_token_encrypted=get_secret_box().encrypt(value),
             step=RegistrationStep.BOT_ID.value,
         )
         username = bot.get("username") or "بدون نام کاربری"
@@ -128,7 +127,11 @@ async def process_step(record: RepresentativeRegistration, step: RegistrationSte
         client = PasarguardClient(record.panel_url, value)
         if not await client.health():
             raise ValidationError("اتصال به پنل یا API Key معتبر نیست.")
-        await STORE.update(record.id, panel_api_key_encrypted=secret_box.encrypt(value), step=RegistrationStep.REVIEW.value)
+        await STORE.update(
+            record.id,
+            panel_api_key_encrypted=get_secret_box().encrypt(value),
+            step=RegistrationStep.REVIEW.value,
+        )
         return RegistrationStep.REVIEW, None
 
     raise ValidationError("مرحله ثبت نام نامعتبر است. از منوی اصلی دوباره شروع کنید.")
