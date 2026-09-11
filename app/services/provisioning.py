@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import traceback
 
 from app.db.models import RegistrationStatus
 from app.db.session import SessionFactory
@@ -25,11 +26,17 @@ class ProvisioningService:
         self.tenants = TenantService()
 
     async def provision(self, registration_id: int) -> ProvisionResult:
+        print(f"[provisioning] START registration={registration_id}", flush=True)
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         record = await self.registrations.get(registration_id)
         if record is None:
             raise LookupError("registration not found")
+        print(
+            f"[provisioning] registration={record.id} status={record.status} bot_id={record.bot_id} "
+            f"panel_url={record.panel_url!r}",
+            flush=True,
+        )
         if record.status not in (RegistrationStatus.PROVISIONING.value, RegistrationStatus.FAILED.value):
             if record.status == RegistrationStatus.ACTIVE.value and record.tenant_id:
                 tenant = await self.tenants.get_by_registration(record.id)
@@ -53,6 +60,7 @@ class ProvisioningService:
         panel_api_key = box.decrypt(record.panel_api_key_encrypted)
         tenant = None
         try:
+            print(f"[provisioning] creating/updating tenant registration={record.id}", flush=True)
             tenant = await self.tenants.provision(
                 registration_id=record.id,
                 owner_id=record.owner_id,
@@ -64,19 +72,29 @@ class ProvisioningService:
                 panel_username=record.panel_username,
                 panel_api_key=panel_api_key,
             )
+            print(f"[provisioning] tenant ready tenant={tenant.id}; starting Telegram runtime", flush=True)
             runtime = await registry.start(tenant.id, bot_token)
+            print(f"[provisioning] Telegram runtime started tenant={tenant.id}", flush=True)
             me = await runtime.client.get_me()
             username = getattr(me, "username", None)
+            print(f"[provisioning] Telegram getMe OK tenant={tenant.id} username={username!r}", flush=True)
             tenant = await self.tenants.update_bot_username(tenant.id, username)
             await self.tenants.activate(tenant.id)
             await self.registrations.mark_active(record.id, tenant.id)
+            print(f"[provisioning] ACTIVE registration={record.id} tenant={tenant.id}", flush=True)
             return ProvisionResult(record.id, tenant.id, username)
         except Exception as exc:
+            print(
+                f"[provisioning] FAILED registration={record.id} tenant={getattr(tenant, 'id', None)} "
+                f"error={type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            traceback.print_exc()
             if tenant is not None:
                 try:
                     await self.tenants.fail(tenant.id)
                     await registry.stop(tenant.id)
-                except Exception:
-                    pass
+                except Exception as cleanup_exc:
+                    print(f"[provisioning] cleanup failed tenant={tenant.id}: {type(cleanup_exc).__name__}: {cleanup_exc}", flush=True)
             await self.registrations.mark_failed(record.id, f"Provisioning failed: {type(exc).__name__}")
             raise
