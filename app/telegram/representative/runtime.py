@@ -5,11 +5,12 @@ from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_dashboard import RepresentativeDashboardService
 from app.services.representative_users import SERVICE as USER_SERVICE
 from app.services.texts import SERVICE as TEXT_SERVICE
+from app.services.referrals import SERVICE as REFERRAL_SERVICE
 class RepresentativeRuntime:
     def __init__(self,tenant_id:str,bot_token:str):
         self.tenant_id=tenant_id; self.bot_token=bot_token; self.client=TelegramClient(f"tenant-{tenant_id}",settings.telegram_api_id,settings.telegram_api_hash); self.is_running=False; self.dashboard=RepresentativeDashboardService()
     def register(self):
-        self.client.add_event_handler(self._start,events.NewMessage(pattern=r"^/start$"))
+        self.client.add_event_handler(self._start,events.NewMessage(pattern=r"^/start(?:\s+(.+))?$"))
         from app.telegram.representative.admin import register as a
         from app.telegram.representative.plans import register as p
         from app.telegram.representative.users import register as u
@@ -38,6 +39,15 @@ class RepresentativeRuntime:
                 return await event.respond(await dashboard_text(),buttons=ADMIN_MENU)
             user=await USER_SERVICE.upsert_from_sender(await event.get_sender())
             if user.blocked: return await event.respond(await TEXT_SERVICE.get("blocked_user"))
+            ref_arg=event.pattern_match.group(1) if event.pattern_match else None
+            if ref_arg:
+                ref_arg=ref_arg.strip()
+                if ref_arg.startswith("ref_"):
+                    try:
+                        inviter_id=int(ref_arg[4:])
+                        await REFERRAL_SERVICE.attach(inviter_id,event.sender_id)
+                    except (ValueError,LookupError):
+                        pass
             from app.telegram.representative.navigation import customer_menu
             await event.respond(await TEXT_SERVICE.get("welcome"),buttons=await customer_menu())
     async def start(self):
