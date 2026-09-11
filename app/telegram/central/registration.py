@@ -4,7 +4,8 @@ from telethon import Button, events
 
 from app.core.config import settings
 from app.core.exceptions import ValidationError
-from app.db.models import RegistrationStep, RegistrationStatus
+from app.db.models import RegistrationStep, RegistrationStatus, RepresentativeRegistration
+from app.db.session import SessionFactory
 from app.services.pasarguard import PasarguardClient
 from app.services.registration import RegistrationService
 from app.services.registration_store import RegistrationStore
@@ -20,7 +21,6 @@ CONTINUE = b"central:registration:continue"
 CONFIRM = b"central:registration:confirm"
 BACK = b"central:registration:back"
 
-
 PROMPTS = {
     RegistrationStep.BRAND: "🏷 **مرحله ۱ از ۶ — نام برند**\n\nنام برند نمایندگی را ارسال کنید.",
     RegistrationStep.BOT_TOKEN: "🤖 **مرحله ۲ از ۶ — Bot Token**\n\nتوکن ربات نمایندگی را ارسال کنید.",
@@ -31,7 +31,7 @@ PROMPTS = {
 }
 
 
-async def register_registration_handlers(client) -> None:
+def register_registration_handlers(client) -> None:
     client.add_event_handler(continue_registration, events.CallbackQuery(data=CONTINUE))
     client.add_event_handler(cancel_registration, events.CallbackQuery(data=CANCEL))
     client.add_event_handler(confirm_registration, events.CallbackQuery(data=CONFIRM))
@@ -61,9 +61,6 @@ async def input_router(event):
     if not _private(event) or not event.raw_text:
         return
     if event.raw_text.strip().lower() in {"/cancel", "cancel", "لغو"}:
-        record = await STORE.latest_for_owner(event.sender_id)
-        if record and record.status == RegistrationStatus.DRAFT.value:
-            await event.respond("❌ ثبت درخواست لغو شد. هر زمان بخواهید می‌توانید دوباره شروع کنید.")
         return
 
     record = await STORE.latest_for_owner(event.sender_id)
@@ -72,7 +69,7 @@ async def input_router(event):
     step = RegistrationStep(record.step)
     value = event.raw_text.strip()
     try:
-        next_step, message = await process_step(record.id, step, value)
+        next_step, message = await process_step(record, step, value)
     except ValidationError as exc:
         await event.respond(f"❌ {exc}\n\n{PROMPTS[step]}", buttons=wizard_buttons())
         return
@@ -84,75 +81,57 @@ async def input_router(event):
         record = await STORE.latest_for_owner(event.sender_id)
         await event.respond(review_text(record), buttons=review_buttons())
         return
-    await STORE.set_step(record.id, next_step)
     await event.respond(message or PROMPTS[next_step], buttons=wizard_buttons())
 
 
-async def process_step(record_id: int, step: RegistrationStep, value: str) -> tuple[RegistrationStep, str | None]:
+async def process_step(record: RepresentativeRegistration, step: RegistrationStep, value: str) -> tuple[RegistrationStep, str | None]:
     if step == RegistrationStep.BRAND:
         brand = RegistrationService.validate_brand(value)
-        await STORE.update(record_id, brand=brand, step=RegistrationStep.BOT_TOKEN.value)
+        await STORE.update(record.id, brand=brand, step=RegistrationStep.BOT_TOKEN.value)
         return RegistrationStep.BOT_TOKEN, None
 
     if step == RegistrationStep.BOT_TOKEN:
         bot = await BOT_VERIFIER.get_me(value)
         await STORE.update(
-            record_id,
+            record.id,
             bot_id=int(bot["id"]),
             bot_token_encrypted=secret_box.encrypt(value),
             step=RegistrationStep.BOT_ID.value,
         )
-        return RegistrationStep.BOT_ID, f"✅ ربات `{bot.get('username', 'بدون نام کاربری')}` شناسایی شد.\n\n{PROMPTS[RegistrationStep.BOT_ID]}"
+        username = bot.get("username") or "بدون نام کاربری"
+        return RegistrationStep.BOT_ID, f"✅ ربات `@{username}` شناسایی شد.\n\n{PROMPTS[RegistrationStep.BOT_ID]}"
 
     if step == RegistrationStep.BOT_ID:
         if not value.isdigit():
             raise ValidationError("Bot ID باید فقط عدد باشد.")
-        current = await STORE.latest_for_owner(0) if False else None
-        raise ValidationError("این مرحله باید با شناسه ثبت‌شده در Bot Token مطابقت داشته باشد. لطفاً از همان شناسه عددی استفاده کنید.") if current else _validate_bot_id_from_record(record_id, value)
+        if record.bot_id != int(value):
+            raise ValidationError("Bot ID با Bot Token مطابقت ندارد.")
+        await STORE.set_step(record.id, RegistrationStep.PANEL_URL)
+        return RegistrationStep.PANEL_URL, None
 
     if step == RegistrationStep.PANEL_URL:
         url = RegistrationService.normalize_panel_url(value)
-        await STORE.update(record_id, panel_url=url, step=RegistrationStep.PANEL_USERNAME.value)
+        await STORE.update(record.id, panel_url=url, step=RegistrationStep.PANEL_USERNAME.value)
         return RegistrationStep.PANEL_USERNAME, None
 
     if step == RegistrationStep.PANEL_USERNAME:
         if not 2 <= len(value) <= 190 or " " in value:
             raise ValidationError("نام کاربری پنل معتبر نیست.")
-        await STORE.update(record_id, panel_username=value, step=RegistrationStep.PANEL_API_KEY.value)
+        await STORE.update(record.id, panel_username=value, step=RegistrationStep.PANEL_API_KEY.value)
         return RegistrationStep.PANEL_API_KEY, None
 
     if step == RegistrationStep.PANEL_API_KEY:
         if len(value) < 8:
             raise ValidationError("API Key خیلی کوتاه است.")
-        record = await _get_record(record_id)
         if not record.panel_url:
             raise ValidationError("آدرس پنل ثبت نشده است.")
         client = PasarguardClient(record.panel_url, value)
         if not await client.health():
             raise ValidationError("اتصال به پنل یا API Key معتبر نیست.")
-        await STORE.update(record_id, panel_api_key_encrypted=secret_box.encrypt(value), step=RegistrationStep.REVIEW.value)
+        await STORE.update(record.id, panel_api_key_encrypted=secret_box.encrypt(value), step=RegistrationStep.REVIEW.value)
         return RegistrationStep.REVIEW, None
 
     raise ValidationError("مرحله ثبت نام نامعتبر است. از منوی اصلی دوباره شروع کنید.")
-
-
-async def _get_record(record_id: int):
-    if not hasattr(STORE, "_session_record"):
-        pass
-    from app.db.session import SessionFactory
-    if SessionFactory is None:
-        raise RuntimeError("DATABASE_URL is not configured")
-    async with SessionFactory() as session:
-        from app.db.models import RepresentativeRegistration
-        return await session.get(RepresentativeRegistration, record_id)
-
-
-async def _validate_bot_id_from_record(record_id: int, value: str) -> tuple[RegistrationStep, str | None]:
-    record = await _get_record(record_id)
-    if record is None or record.bot_id != int(value):
-        raise ValidationError("Bot ID با Bot Token مطابقت ندارد.")
-    await STORE.update(record_id, step=RegistrationStep.PANEL_URL.value)
-    return RegistrationStep.PANEL_URL, None
 
 
 async def confirm_registration(event):
@@ -163,7 +142,14 @@ async def confirm_registration(event):
     if record is None or record.status != RegistrationStatus.DRAFT.value:
         await event.edit("❌ درخواست قابل تأیید نیست.")
         return
-    required = (record.brand, record.bot_id, record.bot_token_encrypted, record.panel_url, record.panel_username, record.panel_api_key_encrypted)
+    required = (
+        record.brand,
+        record.bot_id,
+        record.bot_token_encrypted,
+        record.panel_url,
+        record.panel_username,
+        record.panel_api_key_encrypted,
+    )
     if not all(required):
         await event.edit("❌ اطلاعات ناقص است. به مراحل ثبت برگردید.", buttons=wizard_buttons())
         return
@@ -185,7 +171,7 @@ async def cancel_registration(event):
     if not _private(event):
         return
     await event.answer()
-    await event.edit("❌ فرایند ثبت متوقف شد. اطلاعات ناقص به‌عنوان درخواست فعال پردازش نمی‌شود.")
+    await event.edit("❌ فرایند ثبت متوقف شد. برای ادامه، از منوی اصلی دوباره ثبت نمایندگی را انتخاب کنید.")
 
 
 async def back_registration(event):
@@ -211,9 +197,7 @@ async def back_registration(event):
 
 
 def wizard_buttons():
-    return [
-        [Button.inline("🔙 مرحله قبل", BACK), Button.inline("❌ لغو", CANCEL)],
-    ]
+    return [[Button.inline("🔙 مرحله قبل", BACK), Button.inline("❌ لغو", CANCEL)]]
 
 
 def review_buttons():
