@@ -1,0 +1,60 @@
+# طراحی صفحه‌به‌صفحه پنل نماینده
+
+این سند blueprint پیاده‌سازی پنل مدیریت Representative است.
+
+## A-01 داشبورد
+**نمایش:** وضعیت Panel، فروش، کاربران، سرویس‌ها، خطاهای مهم.
+
+**States:** loading / ready / empty / error.
+
+## A-02 مدیریت پلن‌ها
+**نمایش:** لیست پلن‌ها، وضعیت، قیمت، حجم و مدت.
+
+**Actions:** ساخت، ویرایش، فعال/غیرفعال، حذف.
+
+## A-03 ساخت پلن
+Wizard چهار مرحله‌ای/چندمرحله‌ای باید هر ورودی را با state واضح ثبت کند:
+
+```text
+Panel → Type → Volume → Days → Price → Limits → Confirm → Save
+```
+
+هر مرحله باید Back، Cancel، validation و error state داشته باشد.
+
+## A-04 کاربران
+Search → User List → User Details → Services/Orders/Balance.
+
+## A-05 فروش
+Orders → Order Details → Payment Status → Service Result.
+
+## A-06 تنظیمات فروش
+تمام تنظیمات custom purchase، pricing و sale mode باید Tenant-scoped باشند.
+
+## A-07 تخفیف
+List → Create → Edit → Disable/Delete → Usage.
+
+## A-08 متن‌ها و دکمه‌ها
+ویرایش متن باید key-based باشد و fallback داشته باشد تا حذف اشتباه متن باعث crash نشود.
+
+## A-09 لاگ‌ها
+Filter by time/type/user/action و نمایش خطای قابل فهم.
+
+## A-10 لینک‌ها
+ساخت و کپی deep-linkهای آماده.
+
+## A-11 تنظیمات نماینده
+اطلاعات فروشگاه، پشتیبانی، کانال، محدودیت‌ها و تنظیمات Runtime.
+
+## قرارداد مشترک صفحه‌ها
+هر صفحه باید تعریف کند:
+- Entry point
+- Permission
+- Keyboard/buttons
+- Callback data
+- State key
+- DB reads/writes
+- Service/API calls
+- Success message
+- Error message
+- Back path
+- Cancel path
