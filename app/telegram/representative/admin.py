@@ -17,7 +17,7 @@ async def show_admin(event):
  if await _authorized(event): await event.respond(await dashboard_text(),buttons=ADMIN_MENU)
 async def admin_callback(event):
  if not await _authorized(event): return await event.answer("دسترسی مدیریت ندارید.",alert=True)
- if event.data.startswith((b"rep:plans:",b"rep:users:",b"rep:orders:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:",b"rep:links:")): return
+ if event.data.startswith((b"rep:plans:",b"rep:users:",b"rep:orders:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:",b"rep:links:",b"rep:settings:")): return
  action=event.data[len(PREFIX):].decode(errors="ignore")
  if action==REP_HOME: await event.edit(await dashboard_text(),buttons=ADMIN_MENU); return await event.answer()
  if action==REP_PLANS:
@@ -44,5 +44,7 @@ async def admin_callback(event):
  if action==REP_LINKS:
   from app.telegram.representative.links import render
   t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
- if action==REP_SETTINGS: await event.answer("تنظیمات نماینده در صفحه بعدی فعال می‌شود.",alert=True); return
+ if action==REP_SETTINGS:
+  from app.telegram.representative.settings import render
+  t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
  await event.answer("گزینه نامعتبر است.",alert=True)
