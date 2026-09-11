@@ -15,6 +15,7 @@ REP_TEXTS = "rep.texts"
 REP_LOGS = "rep.logs"
 REP_LINKS = "rep.links"
 REP_SETTINGS = "rep.settings"
+REP_PANEL = "rep.panel"
 
 USER_HOME = "user.home"
 USER_SERVICES = "user.services"
