@@ -24,37 +24,20 @@ class Tenant:
 class TenantService:
     """Persistent tenant lifecycle with idempotent provisioning."""
 
-    async def provision(
-        self,
-        registration_id: int,
-        owner_id: int,
-        brand: str,
-        bot_id: int,
-        bot_username: str | None,
-        bot_token: str,
-        panel_url: str,
-        panel_username: str | None,
-        panel_api_key: str,
-    ) -> Tenant:
+    async def provision(self, registration_id: int, owner_id: int, brand: str, bot_id: int,
+                        bot_username: str | None, bot_token: str, panel_url: str,
+                        panel_username: str | None, panel_api_key: str) -> Tenant:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            existing = await session.scalar(
-                select(TenantRecord).where(TenantRecord.registration_id == registration_id)
-            )
+            existing = await session.scalar(select(TenantRecord).where(TenantRecord.registration_id == registration_id))
             box = get_secret_box()
             if existing is None:
                 existing = TenantRecord(
-                    id=f"tenant_{uuid4().hex}",
-                    registration_id=registration_id,
-                    owner_id=owner_id,
-                    brand=brand,
-                    bot_id=bot_id,
-                    bot_username=bot_username,
-                    bot_token_encrypted=box.encrypt(bot_token),
-                    panel_url=panel_url,
-                    panel_username=panel_username,
-                    panel_api_key_encrypted=box.encrypt(panel_api_key),
+                    id=f"tenant_{uuid4().hex}", registration_id=registration_id, owner_id=owner_id,
+                    brand=brand, bot_id=bot_id, bot_username=bot_username,
+                    bot_token_encrypted=box.encrypt(bot_token), panel_url=panel_url,
+                    panel_username=panel_username, panel_api_key_encrypted=box.encrypt(panel_api_key),
                     status=TenantStatus.PROVISIONING.value,
                 )
                 session.add(existing)
@@ -73,13 +56,23 @@ class TenantService:
             await session.refresh(existing)
             return self._to_domain(existing)
 
+    async def update_bot_username(self, tenant_id: str, username: str | None) -> Tenant:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            record = await session.get(TenantRecord, tenant_id)
+            if record is None:
+                raise LookupError("tenant not found")
+            record.bot_username = username
+            await session.commit()
+            await session.refresh(record)
+            return self._to_domain(record)
+
     async def get_by_registration(self, registration_id: int) -> Tenant | None:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            record = await session.scalar(
-                select(TenantRecord).where(TenantRecord.registration_id == registration_id)
-            )
+            record = await session.scalar(select(TenantRecord).where(TenantRecord.registration_id == registration_id))
             return self._to_domain(record) if record else None
 
     async def set_status(self, tenant_id: str, status: TenantStatus) -> Tenant:
@@ -105,12 +98,4 @@ class TenantService:
 
     @staticmethod
     def _to_domain(record: TenantRecord) -> Tenant:
-        return Tenant(
-            id=record.id,
-            owner_id=record.owner_id,
-            brand=record.brand,
-            bot_id=record.bot_id,
-            bot_username=record.bot_username,
-            panel_url=record.panel_url,
-            status=record.status,
-        )
+        return Tenant(record.id, record.owner_id, record.brand, record.bot_id, record.bot_username, record.panel_url, record.status)
