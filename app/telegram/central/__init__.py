@@ -3,6 +3,7 @@ from __future__ import annotations
 from telethon import Button, events
 
 from app.services.registration_store import RegistrationStore
+from app.telegram.central.registration import register_registration_handlers
 
 
 STORE = RegistrationStore()
@@ -31,6 +32,7 @@ def register_central_handlers(client) -> None:
     client.add_event_handler(track_latest, events.CallbackQuery(data=TRACK_LATEST))
     client.add_event_handler(home, events.CallbackQuery(data=HOME))
     client.add_event_handler(cancel, events.CallbackQuery(data=CANCEL))
+    register_registration_handlers(client)
 
 
 def _private(event) -> bool:
@@ -55,7 +57,7 @@ async def register(event):
         return
     await event.answer()
     try:
-        record = await STORE.create_draft(event.sender_id)
+        record = await STORE.create_or_resume_draft(event.sender_id)
     except Exception:
         await event.edit(
             "❌ در ایجاد درخواست مشکلی پیش آمد.\n\n"
@@ -66,11 +68,11 @@ async def register(event):
 
     await event.edit(
         "🤖 **ثبت ربات نمایندگی**\n\n"
-        "درخواست شما ایجاد شد.\n\n"
+        "درخواست شما ایجاد یا ادامه داده شد.\n\n"
         f"🆔 کد پیگیری: `{record.tracking_code}`\n\n"
-        "در مرحله بعد اطلاعات ربات و پنل را وارد می‌کنید.\n"
-        "این کد را تا پایان فرایند نگه دارید.",
+        "اطلاعات ربات و پنل را مرحله‌به‌مرحله وارد می‌کنید.",
         buttons=[
+            [Button.inline("▶️ ادامه ثبت", b"central:registration:continue")],
             [Button.inline("🔎 مشاهده وضعیت", TRACK_LATEST)],
             [Button.inline("🔙 بازگشت", HOME)],
         ],
@@ -96,16 +98,10 @@ async def track_latest(event):
     try:
         record = await STORE.latest_for_owner(event.sender_id)
     except Exception:
-        await event.edit(
-            "❌ دریافت وضعیت درخواست ممکن نشد.\n\nلطفاً دوباره تلاش کنید.",
-            buttons=back_button(),
-        )
+        await event.edit("❌ دریافت وضعیت درخواست ممکن نشد.\n\nلطفاً دوباره تلاش کنید.", buttons=back_button())
         return
     if record is None:
-        await event.edit(
-            "📭 هنوز هیچ درخواست نمایندگی برای حساب شما ثبت نشده است.",
-            buttons=menu(),
-        )
+        await event.edit("📭 هنوز هیچ درخواست نمایندگی برای حساب شما ثبت نشده است.", buttons=menu())
         return
     await event.edit(registration_status_text(record), buttons=menu())
 
