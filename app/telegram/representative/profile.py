@@ -15,9 +15,15 @@ def register(client, tenant_id=None):
     async def callback(event):
         async with tenant_dispatch(tenant_id):
             if not await allowed(event):
-                return await event.answer("دسترسی به این بخش ندارید.", alert=True)
+                return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
             await render_callback(event)
+
+    async def message(event):
+        async with tenant_dispatch(tenant_id):
+            await handle_message(event)
+
     client.add_event_handler(callback, events.CallbackQuery(data=PREFIX))
+    client.add_event_handler(message, events.NewMessage(incoming=True))
 
 
 async def allowed(event):
@@ -33,18 +39,8 @@ async def render_profile(telegram_user_id: int):
         return "👤 **پروفایل من**\n\nاطلاعات کاربری پیدا نشد.", [[Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())]]
     username = f"@{user.username}" if user.username else "ندارد"
     name = " ".join(x for x in (user.first_name, user.last_name) if x) or "ثبت نشده"
-    text = (
-        "👤 **پروفایل من**\n\n"
-        f"🆔 شناسه تلگرام: `{user.telegram_user_id}`\n"
-        f"👤 نام: **{name}**\n"
-        f"🔹 نام کاربری: **{username}**\n"
-        f"💰 موجودی: **{user.balance:,.2f}**"
-    )
-    buttons = [
-        [Button.inline("✏️ ویرایش نام", PREFIX + b"edit_name")],
-        [Button.inline("🔄 بروزرسانی", PREFIX + b"show")],
-        [Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())],
-    ]
+    text = "👤 **پروفایل من**\n\n" + f"🆔 شناسه تلگرام: `{user.telegram_user_id}`\n" + f"👤 نام: **{name}**\n" + f"🔹 نام کاربری: **{username}**\n" + f"💰 موجودی: **{user.balance:,.2f}**"
+    buttons = [[Button.inline("✏️ ویرایش نام", PREFIX + b"edit_name")], [Button.inline("🔄 بروزرسانی", PREFIX + b"show")], [Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())]]
     return text, buttons
 
 
@@ -55,7 +51,10 @@ async def render_callback(event):
         await event.edit(text, buttons=buttons)
         return await event.answer()
     if action == "edit_name":
-        await event.edit("✏️ **ویرایش نام**\n\nنام جدید را در پیام بعدی ارسال کنید.\n\nبرای لغو: `/cancel`", buttons=[[Button.inline("🔙 انصراف", PREFIX + b"show")]])
+        state = getattr(event.client, "_profile_edit_users", set())
+        event.client._profile_edit_users = state
+        state.add(event.sender_id)
+        await event.edit("✏️ **ویرایش نام**\n\nنام جدید را به صورت زیر ارسال کنید:\n`نام` یا `نام|نام خانوادگی`\n\nبرای لغو `/cancel` را ارسال کنید.", buttons=[[Button.inline("🔙 انصراف", PREFIX + b"show")]])
         return await event.answer()
     await event.answer("گزینه نامعتبر است.", alert=True)
 
@@ -68,5 +67,18 @@ async def handle_message(event):
         return
     text = (event.raw_text or "").strip()
     if text == "/cancel":
+        state = getattr(event.client, "_profile_edit_users", set())
+        state.discard(event.sender_id)
         from app.telegram.representative.user import customer_menu
         return await event.respond("عملیات لغو شد.", buttons=await customer_menu())
+    state = getattr(event.client, "_profile_edit_users", set())
+    if event.sender_id not in state or not text or text.startswith("/"):
+        return
+    parts = [p.strip() for p in text.split("|", 1)]
+    try:
+        await SERVICE.update_name(event.sender_id, parts[0], parts[1] if len(parts) == 2 else None)
+    except ValueError:
+        return await event.respond("❌ نام واردشده معتبر نیست. دوباره ارسال کنید یا `/cancel` بزنید.")
+    state.discard(event.sender_id)
+    from app.telegram.representative.user import customer_menu
+    await event.respond("✅ نام پروفایل با موفقیت ذخیره شد.", buttons=await customer_menu())
