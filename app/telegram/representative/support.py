@@ -4,7 +4,7 @@ from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_users import SERVICE as USERS
 from app.services.representative_settings import SERVICE as SETTINGS
-PREFIX=b"user:support:"
+PREFIX=b"user:support"
 def register(client, tenant_id=None):
     async def callback(event):
         async with tenant_dispatch(tenant_id):
@@ -21,6 +21,6 @@ async def render(event):
     contact=f"@{username.lstrip('@')}" if username else "از طریق نماینده پشتیبانی پیام ارسال کنید."
     return await event.edit("🆘 **پشتیبانی**\n\n"+f"راه ارتباطی: {contact}\n\nدر صورت مشکل در خرید، پرداخت یا سرویس، شماره سفارش و توضیح مشکل را ارسال کنید.",buttons=[[Button.inline("📦 سفارش‌های من",b"user:services")],[Button.inline("🔙 فروشگاه",b"user:home")]])
 async def render_callback(event):
-    action=event.data[len(PREFIX):].decode(errors="ignore")
+    action=event.data[len(PREFIX):].decode(errors="ignore").lstrip(":")
     if action in ("","open"): return await render(event)
     await event.answer("گزینه نامعتبر است.",alert=True)
