@@ -16,12 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 async def run(stop_event: asyncio.Event | None = None) -> None:
-    if not settings.telegram_api_id or not settings.telegram_api_hash or not settings.central_bot_token:
-        raise RuntimeError("API_ID, API_HASH and BOT_TOKEN are required")
+    if not settings.central_bot_token:
+        raise RuntimeError("BOT_TOKEN is required")
 
     await initialize_database()
 
-    client = TelegramClient("central", settings.telegram_api_id, settings.telegram_api_hash)
+    # The local telethon compatibility facade is Bot API-only. API_ID/API_HASH
+    # are intentionally not required anywhere in the application runtime.
+    client = TelegramClient("central")
     register_central_handlers(client)
     register_central_admin_handlers(client)
     await client.start(bot_token=settings.central_bot_token)
