@@ -4,6 +4,7 @@ from telethon import TelegramClient, events
 
 from app.core.config import settings
 from app.runtime.dispatcher import tenant_dispatch
+from app.services.representative_dashboard import RepresentativeDashboardService
 
 
 class RepresentativeRuntime:
@@ -12,21 +13,32 @@ class RepresentativeRuntime:
     def __init__(self, tenant_id: str, bot_token: str):
         self.tenant_id = tenant_id
         self.bot_token = bot_token
-        self.client = TelegramClient(
-            f"tenant-{tenant_id}", settings.telegram_api_id, settings.telegram_api_hash
-        )
+        self.client = TelegramClient(f"tenant-{tenant_id}", settings.telegram_api_id, settings.telegram_api_hash)
         self.is_running = False
+        self.dashboard = RepresentativeDashboardService()
 
     def register(self) -> None:
         self.client.add_event_handler(self._start, events.NewMessage(pattern=r"^/start$"))
+        self.client.add_event_handler(self._admin_start, events.NewMessage(pattern=r"^/admin$"))
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
+            if await self.dashboard.is_owner(event.sender_id):
+                from app.telegram.representative.admin import dashboard_text, ADMIN_MENU
+                await event.respond(await dashboard_text(), buttons=ADMIN_MENU)
+                return
+            from app.telegram.representative.user import USER_MENU
             await event.respond(
-                "🏪 **فروشگاه نمایندگی**\n\n"
-                "به فروشگاه خوش آمدید.\n"
-                "از این ربات می‌توانید سرویس خریداری کنید، سرویس‌های خود را ببینید و حساب کاربری را مدیریت کنید."
+                "🏪 **فروشگاه**\n\nبه فروشگاه نمایندگی خوش آمدید. از گزینه‌های زیر شروع کنید.",
+                buttons=USER_MENU,
             )
+
+    async def _admin_start(self, event):
+        async with tenant_dispatch(self.tenant_id):
+            if not await self.dashboard.is_owner(event.sender_id):
+                return
+            from app.telegram.representative.admin import dashboard_text, ADMIN_MENU
+            await event.respond(await dashboard_text(), buttons=ADMIN_MENU)
 
     async def start(self) -> None:
         if self.is_running:
