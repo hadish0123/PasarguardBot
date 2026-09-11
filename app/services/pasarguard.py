@@ -16,33 +16,39 @@ class ProvisionedUser:
 class PasarguardClient:
     def __init__(self, base_url: str, api_key: str):
         self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
+        self.api_key = api_key.strip()
 
     def _headers(self) -> dict[str, str]:
+        # PasarGuard API keys are accepted through X-Api-Key or the
+        # Authorization: ApiKey scheme. Bearer is JWT authentication and is
+        # not valid for pg_key_* credentials.
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-Api-Key": self.api_key,
+            "Authorization": f"ApiKey {self.api_key}",
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
 
     async def health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
                 response = await client.get(
-                    f"{self.base_url}/api/system/info",
+                    f"{self.base_url}/api/system/resources",
                     headers=self._headers(),
                 )
-            if response.status_code in (401, 403):
-                raise PermissionError("احراز هویت پنل ناموفق است؛ کلید API را بررسی کنید.")
-            if not response.is_success:
-                raise ExternalServiceError(
-                    f"پنل پاسارگارد پاسخ HTTP {response.status_code} برگرداند."
-                )
-            return True
-        except PermissionError:
-            raise
         except httpx.HTTPError as exc:
-            raise ExternalServiceError("ارتباط با پنل پاسارگارد برقرار نشد.") from exc
+            raise ExternalServiceError("ارتباط با پنل پاسارگارد برقرار نشد؛ آدرس پنل یا دسترسی شبکه را بررسی کنید.") from exc
+
+        if response.status_code in (401, 403):
+            raise PermissionError("کلید API پاسارگارد معتبر نیست یا دسترسی خواندن اطلاعات سیستم را ندارد.")
+        if not response.is_success:
+            detail = response.text.strip()
+            if len(detail) > 250:
+                detail = detail[:250]
+            raise ExternalServiceError(
+                f"پنل پاسارگارد پاسخ HTTP {response.status_code} برگرداند. {detail}"
+            )
+        return True
 
     async def create_user_from_template(
         self,
@@ -63,7 +69,7 @@ class PasarguardClient:
             payload["note"] = note
 
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
                 response = await client.post(
                     f"{self.base_url}/api/user/from_template",
                     headers=self._headers(),
@@ -87,9 +93,6 @@ class PasarguardClient:
         except ValueError as exc:
             raise ExternalServiceError("پاسخ ساخت کاربر پاسارگارد JSON معتبر نیست.") from exc
 
-        # PasarGuard returns a user object. Keep parsing tolerant across minor
-        # API response shape changes while refusing to mark a service active
-        # without a real provider identifier.
         if not isinstance(data, dict):
             raise ExternalServiceError("پاسخ پاسارگارد برای کاربر ساختاری نامعتبر دارد.")
 
