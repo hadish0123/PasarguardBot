@@ -36,22 +36,20 @@ class MultiBotManager:
         return self._locks.setdefault(registration_id, asyncio.Lock())
 
     def _handler_copy(self):
-        """Copy central handlers to representatives, excluding central-only handlers.
-
-        Raw handlers are intentionally not cloned: the business-connection Raw handler
-        is central-only and can receive ordinary representative updates in the custom
-        dispatcher, where it expects ``event.connection`` and aborts the update before
-        normal NewMessage handlers (including /start) can run.
-        """
+        """Copy normal application handlers, never raw/MTProto handlers, to representatives."""
         copied = []
         for item in self.central_client._handlers:
-            handler = item[0]
-            module = getattr(handler, "__module__", "")
-            if module.endswith("central_registration"):
+            handler, builder = item
+            handler_module = getattr(handler, "__module__", "")
+            builder_class = builder.__class__.__name__ if builder is not None else ""
+            builder_module = getattr(builder.__class__, "__module__", "") if builder is not None else ""
+            if handler_module.endswith("central_registration"):
                 continue
-            if module.startswith("app.telegram.business.connection"):
+            # Raw handlers are MTProto-specific and the custom Bot API dispatcher cannot
+            # safely execute them for ordinary Bot API updates.
+            if builder_class == "Raw" or builder_module.startswith("telethon"):
                 continue
-            if handler.__class__.__name__ == "Raw" or getattr(handler, "__name__", "") == "Raw":
+            if handler_module.startswith("app.telegram.business"):
                 continue
             copied.append(item)
         return copied
@@ -120,15 +118,9 @@ class MultiBotManager:
                     tenant.bot_username or "unknown",
                 )
                 return runtime
-            except Exception as exc:
+            except Exception:
                 logger.exception("Representative runtime failed | registration=%s", registration_id)
                 await client.disconnect()
-                await update_registration(
-                    registration_id,
-                    status="pending",
-                    step="awaiting_admin",
-                    rejection_reason=str(exc),
-                )
                 raise
 
     async def _run(self, runtime: RepresentativeRuntime) -> None:
@@ -183,13 +175,9 @@ class MultiBotManager:
                     if runtime and runtime.client.is_connected() and runtime.task and not runtime.task.done():
                         continue
                     try:
-                        await self.start_for_registration(
-                            rid,
-                            provision=not bool(registration.get("tenant_db_name")),
-                        )
+                        await self.start_for_registration(rid, provision=not bool(registration.get("tenant_db_name")))
                     except Exception:
                         logger.exception("Representative supervisor retry failed | registration=%s", rid)
-
                 for rid in list(self._runtimes):
                     if rid not in eligible_ids:
                         await self.stop_for_registration(rid)
@@ -216,10 +204,7 @@ class MultiBotManager:
             self._supervisor_task.cancel()
             await asyncio.gather(self._supervisor_task, return_exceptions=True)
         self._supervisor_task = None
-        await asyncio.gather(
-            *(self.stop_for_registration(rid) for rid in list(self._runtimes)),
-            return_exceptions=True,
-        )
+        await asyncio.gather(*(self.stop_for_registration(rid) for rid in list(self._runtimes)), return_exceptions=True)
 
     def get_runtime(self, registration_id: int) -> RepresentativeRuntime | None:
         return self._runtimes.get(registration_id)
