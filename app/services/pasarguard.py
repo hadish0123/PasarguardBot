@@ -32,22 +32,17 @@ class PasarguardClient:
         value = value.strip().rstrip("/")
         if not value:
             return value
-        # Users commonly paste the browser URL (…/dashboard or …/dashboard/)
-        # instead of the Panel API base URL. API routes live at the origin.
         parsed = urlsplit(value)
         if parsed.scheme and parsed.netloc:
             path = parsed.path.rstrip("/")
-            for suffix in ("/dashboard", "/dashboard/", "/login", "/dashboard/login"):
-                if path.endswith(suffix.rstrip("/")):
-                    path = path[: -len(suffix.rstrip("/"))].rstrip("/")
+            for suffix in ("/dashboard/login", "/dashboard", "/login"):
+                if path.endswith(suffix):
+                    path = path[: -len(suffix)].rstrip("/")
                     break
             return urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
         return value
 
     def _headers(self) -> dict[str, str]:
-        # PasarGuard Panel API keys (pg_key_...) are sent as X-Api-Key.
-        # Do not add a competing Authorization header: a reverse proxy may
-        # interpret Authorization independently from the Panel API key.
         return {
             "X-Api-Key": self.api_key,
             "Accept": "application/json",
@@ -57,9 +52,16 @@ class PasarguardClient:
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
             async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-                response = await client.request(method, f"{self.base_url}{path}", headers=self._headers(), **kwargs)
+                response = await client.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    headers=self._headers(),
+                    **kwargs,
+                )
         except httpx.HTTPError as exc:
-            raise ExternalServiceError("ارتباط با پنل پاسارگارد برقرار نشد؛ آدرس پنل یا دسترسی شبکه را بررسی کنید.") from exc
+            raise ExternalServiceError(
+                "ارتباط با پنل پاسارگارد برقرار نشد؛ آدرس پنل یا دسترسی شبکه را بررسی کنید."
+            ) from exc
         if response.status_code in (401, 403):
             detail = response.text.strip()[:300]
             raise PermissionError(
@@ -68,8 +70,6 @@ class PasarguardClient:
         return response
 
     async def health(self) -> bool:
-        # /api/admin is a stable authenticated Panel endpoint and is a better
-        # API-key connectivity check than system/resource endpoints.
         response = await self._request("GET", "/api/admin")
         if not response.is_success:
             detail = response.text.strip()[:300]
@@ -79,53 +79,50 @@ class PasarguardClient:
         return True
 
     async def client_count(self) -> int:
-        # Current PasarGuard exposes users at /api/user/s and returns
-        # {users: [...], total: N}. Some older panel releases expose the
-        # collection at /api/user, so fall back on 404 for compatibility.
-        last_status: int | None = None
-        last_detail = ""
-        for path in ("/api/user/s", "/api/user"):
-            response = await self._request("GET", path, params={"limit": 1})
-            last_status = response.status_code
-            last_detail = response.text.strip()[:300]
-            if response.status_code == 404:
-                continue
-            if not response.is_success:
-                raise ExternalServiceError(
-                    f"دریافت تعداد کلاینت‌ها ناموفق بود (HTTP {response.status_code}). {last_detail}"
-                )
-            try:
-                data = response.json()
-            except ValueError as exc:
-                raise ExternalServiceError("پاسخ تعداد کلاینت‌های پاسارگارد JSON معتبر نیست.") from exc
-            if isinstance(data, dict) and isinstance(data.get("total"), int):
-                return data["total"]
-            if isinstance(data, dict) and isinstance(data.get("users"), list):
-                return len(data["users"])
-            if isinstance(data, list):
-                return len(data)
-            raise ExternalServiceError("ساختار پاسخ تعداد کلاینت‌های پاسارگارد نامعتبر است.")
-        raise ExternalServiceError(
-            f"مسیر API کاربران پاسارگارد پیدا نشد (HTTP {last_status}). {last_detail}"
-        )
-
-    async def _first_user_template_id(self) -> int | None:
-        response = await self._request("GET", "/api/user_template/s", params={"limit": 100})
+        # Current PasarGuard exposes the user collection at /api/users.
+        # /api/user/s belongs to older/incompatible API layouts and can return
+        # 405 Method Not Allowed on current panels.
+        response = await self._request("GET", "/api/users", params={"limit": 1})
         if not response.is_success:
-            return None
+            detail = response.text.strip()[:500]
+            raise ExternalServiceError(
+                f"دریافت تعداد کلاینت‌ها ناموفق بود (HTTP {response.status_code}). {detail}"
+            )
         try:
             data = response.json()
         except ValueError as exc:
-            raise ExternalServiceError("پاسخ User Template پاسارگارد JSON معتبر نیست.") from exc
-        items = data if isinstance(data, list) else data.get("items", []) if isinstance(data, dict) else []
-        for item in items:
-            if not isinstance(item, dict):
+            raise ExternalServiceError("پاسخ تعداد کلاینت‌های پاسارگارد JSON معتبر نیست.") from exc
+        if isinstance(data, dict) and isinstance(data.get("total"), int):
+            return data["total"]
+        if isinstance(data, dict) and isinstance(data.get("users"), list):
+            return len(data["users"])
+        if isinstance(data, list):
+            return len(data)
+        raise ExternalServiceError("ساختار پاسخ تعداد کلاینت‌های پاسارگارد نامعتبر است.")
+
+    async def _first_user_template_id(self) -> int | None:
+        # Current RBAC-aware panels expose a simple template list for API
+        # clients/operators. It is optional because direct user creation works.
+        for path in ("/api/user_templates/simple", "/api/user_templates"):
+            response = await self._request("GET", path, params={"limit": 100})
+            if response.status_code == 404:
                 continue
-            if item.get("is_disabled") is True:
-                continue
-            template_id = item.get("id")
-            if isinstance(template_id, int) and template_id > 0:
-                return template_id
+            if not response.is_success:
+                return None
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise ExternalServiceError("پاسخ User Template پاسارگارد JSON معتبر نیست.") from exc
+            items = data if isinstance(data, list) else data.get("items", []) if isinstance(data, dict) else []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("is_disabled") is True:
+                    continue
+                template_id = item.get("id")
+                if isinstance(template_id, int) and template_id > 0:
+                    return template_id
+            return None
         return None
 
     async def create_test_user(self) -> ProvisionedUser:
