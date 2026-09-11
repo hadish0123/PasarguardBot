@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -40,7 +40,6 @@ class TenantStatus(StrEnum):
 
 class RepresentativeRegistration(Base):
     __tablename__ = "representative_registrations"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tracking_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
@@ -60,7 +59,6 @@ class RepresentativeRegistration(Base):
 
 class TenantRecord(Base):
     __tablename__ = "representative_tenants"
-
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     registration_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
@@ -78,7 +76,6 @@ class TenantRecord(Base):
 
 class Plan(Base):
     __tablename__ = "representative_plans"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(120))
@@ -88,3 +85,29 @@ class Plan(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class RepresentativeUser(Base):
+    __tablename__ = "representative_users"
+    __table_args__ = (UniqueConstraint("tenant_id", "telegram_user_id", name="uq_rep_user_tenant_telegram"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[str | None] = mapped_column(String(190), nullable=True, index=True)
+    first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    balance: Mapped[float] = mapped_column(Float, default=0)
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class UserBalanceLog(Base):
+    __tablename__ = "representative_user_balance_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    amount: Mapped[float] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
