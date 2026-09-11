@@ -36,11 +36,25 @@ class MultiBotManager:
         return self._locks.setdefault(registration_id, asyncio.Lock())
 
     def _handler_copy(self):
-        return [
-            item
-            for item in self.central_client._handlers
-            if not getattr(item[0], "__module__", "").endswith("central_registration")
-        ]
+        """Copy central handlers to representatives, excluding central-only handlers.
+
+        Raw handlers are intentionally not cloned: the business-connection Raw handler
+        is central-only and can receive ordinary representative updates in the custom
+        dispatcher, where it expects ``event.connection`` and aborts the update before
+        normal NewMessage handlers (including /start) can run.
+        """
+        copied = []
+        for item in self.central_client._handlers:
+            handler = item[0]
+            module = getattr(handler, "__module__", "")
+            if module.endswith("central_registration"):
+                continue
+            if module.startswith("app.telegram.business.connection"):
+                continue
+            if handler.__class__.__name__ == "Raw" or getattr(handler, "__name__", "") == "Raw":
+                continue
+            copied.append(item)
+        return copied
 
     async def _build_tenant(self, registration: dict) -> TenantRuntime:
         database = registration.get("tenant_db_name") or f"primevpn_rep_{int(registration['id'])}"
