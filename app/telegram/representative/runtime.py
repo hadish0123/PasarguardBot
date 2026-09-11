@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from telethon import TelegramClient, events
 
 from app.runtime.dispatcher import tenant_dispatch
@@ -13,9 +15,9 @@ class RepresentativeRuntime:
     def __init__(self, tenant_id: str, bot_token: str):
         self.tenant_id = tenant_id
         self.bot_token = bot_token
-        # Bot API authentication uses only the representative bot token.
         self.client = TelegramClient(f"tenant-{tenant_id}")
         self.is_running = False
+        self._polling_task: asyncio.Task | None = None
         self.dashboard = RepresentativeDashboardService()
 
     def register(self):
@@ -42,27 +44,13 @@ class RepresentativeRuntime:
         from app.telegram.representative.referral import register as rf
         from app.telegram.representative.support import register as sp
         from app.telegram.representative.support_admin import register as spa
-        a(self.client, self.tenant_id)
-        p(self.client, self.tenant_id)
-        u(self.client, self.tenant_id)
-        o(self.client, self.tenant_id)
-        sv(self.client, self.tenant_id)
-        d(self.client, self.tenant_id)
-        s(self.client, self.tenant_id)
-        t(self.client, self.tenant_id)
-        l(self.client, self.tenant_id)
-        k(self.client, self.tenant_id)
-        r(self.client, self.tenant_id)
-        h(self.client, self.tenant_id)
-        co(self.client, self.tenant_id)
-        n(self.client, self.tenant_id)
-        us(self.client, self.tenant_id)
-        w(self.client, self.tenant_id)
-        pr(self.client, self.tenant_id)
-        du(self.client, self.tenant_id)
-        tr(self.client, self.tenant_id)
-        rf(self.client, self.tenant_id)
-        sp(self.client, self.tenant_id)
+        a(self.client, self.tenant_id); p(self.client, self.tenant_id); u(self.client, self.tenant_id)
+        o(self.client, self.tenant_id); sv(self.client, self.tenant_id); d(self.client, self.tenant_id)
+        s(self.client, self.tenant_id); t(self.client, self.tenant_id); l(self.client, self.tenant_id)
+        k(self.client, self.tenant_id); r(self.client, self.tenant_id); h(self.client, self.tenant_id)
+        co(self.client, self.tenant_id); n(self.client, self.tenant_id); us(self.client, self.tenant_id)
+        w(self.client, self.tenant_id); pr(self.client, self.tenant_id); du(self.client, self.tenant_id)
+        tr(self.client, self.tenant_id); rf(self.client, self.tenant_id); sp(self.client, self.tenant_id)
         spa(self.client, self.tenant_id)
 
     async def _start(self, event):
@@ -74,13 +62,11 @@ class RepresentativeRuntime:
             if user.blocked:
                 return await event.respond(await TEXT_SERVICE.get("blocked_user"))
             ref_arg = event.pattern_match.group(1) if event.pattern_match else None
-            if ref_arg:
-                ref_arg = ref_arg.strip()
-                if ref_arg.startswith("ref_"):
-                    try:
-                        await REFERRAL_SERVICE.attach(int(ref_arg[4:]), event.sender_id)
-                    except (ValueError, LookupError):
-                        pass
+            if ref_arg and ref_arg.strip().startswith("ref_"):
+                try:
+                    await REFERRAL_SERVICE.attach(int(ref_arg.strip()[4:]), event.sender_id)
+                except (ValueError, LookupError):
+                    pass
             from app.telegram.representative.navigation import customer_menu
             await event.respond(await TEXT_SERVICE.get("welcome"), buttons=await customer_menu())
 
@@ -88,10 +74,27 @@ class RepresentativeRuntime:
         if self.is_running:
             return
         self.register()
-        await self.client.start(bot_token=self.bot_token)
-        self.is_running = True
+        try:
+            await self.client.start(bot_token=self.bot_token)
+            self._polling_task = asyncio.create_task(
+                self.client.run_until_disconnected(),
+                name=f"representative-poll-{self.tenant_id}",
+            )
+            self.is_running = True
+        except Exception:
+            await self.client.disconnect()
+            self._polling_task = None
+            self.is_running = False
+            raise
 
     async def stop(self):
-        if self.is_running:
-            await self.client.disconnect()
+        task = self._polling_task
+        self._polling_task = None
         self.is_running = False
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await self.client.disconnect()
