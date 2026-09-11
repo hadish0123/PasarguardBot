@@ -16,21 +16,22 @@ def register(client,tenant_id=None):
    if not await _auth(event):return
    key=(get_tenant(),event.sender_id); step=INPUTS.get(key)
    if not step:return
-   if event.raw_text.strip()=="/cancel":INPUTS.pop(key,None); t,b=await render(); return await event.respond(t,buttons=b)
+   if event.raw_text.strip()=="/cancel":INPUTS.pop(key,None);t,b=await render();return await event.respond(t,buttons=b)
    parts=step.split(":",1)
    try:
-    if parts[0]=="title": INPUTS[key]="url:"+event.raw_text.strip(); return await event.respond("🔗 آدرس لینک را ارسال کنید:")
-    await SERVICE.create(parts[1],event.raw_text.strip()); INPUTS.pop(key,None); t,b=await render(); await event.respond("✅ لینک ذخیره شد.",buttons=b)
-   except ValueError as exc: await event.respond(f"❌ {exc}")
- client.add_event_handler(cb,events.CallbackQuery(data=PREFIX)); client.add_event_handler(cb,events.CallbackQuery(data=b"rep:"+REP_LINKS.encode())); client.add_event_handler(msg,events.NewMessage(incoming=True))
+    if parts[0]=="title":INPUTS[key]="url:"+event.raw_text.strip();return await event.respond("🔗 آدرس لینک را ارسال کنید:")
+    await SERVICE.create(parts[1],event.raw_text.strip());INPUTS.pop(key,None);t,b=await render();await event.respond("✅ لینک ذخیره شد.",buttons=b)
+   except ValueError as exc:await event.respond(f"❌ {exc}")
+ client.add_event_handler(cb,events.CallbackQuery(func=lambda e: bool(e.data and (e.data.startswith(PREFIX) or e.data==b"rep:"+REP_LINKS.encode()))));client.add_event_handler(msg,events.NewMessage(incoming=True))
 async def _auth(event):return bool(event.is_private and get_tenant() and await RepresentativeDashboardService().is_owner(event.sender_id))
 async def render():
- rows=await SERVICE.list(); text="🔗 **لینک‌های آماده**\n\n"+ ("هنوز لینکی ثبت نشده است." if not rows else "\n".join(f"• #{r.id} — **{r.title}**\n  {r.url}" for r in rows)); buttons=[[Button.inline("➕ افزودن لینک",PREFIX+b"add")]]
+ rows=await SERVICE.list();text="🔗 **لینک‌های آماده**\n\n"+("هنوز لینکی ثبت نشده است." if not rows else "\n".join(f"• #{r.id} — **{r.title}**\n  {r.url}" for r in rows));buttons=[[Button.inline("➕ افزودن لینک",PREFIX+b"add")]]
  for r in rows:buttons.append([Button.inline(f"🗑 حذف #{r.id}",PREFIX+f"delete:{r.id}".encode())])
- buttons.append([Button.inline("📊 داشبورد",b"rep:"+REP_HOME.encode())]); return text,buttons
+ buttons.append([Button.inline("📊 داشبورد",b"rep:"+REP_HOME.encode())]);return text,buttons
 async def handle(event):
- action=event.data[len(PREFIX):].decode(errors="ignore"); key=(get_tenant(),event.sender_id)
- if action=="add":INPUTS[key]="title"; return await event.edit("➕ عنوان لینک را ارسال کنید:\nبرای لغو `/cancel`",buttons=[[Button.inline("❌ لغو",PREFIX+b"list")]])
+ action=event.data[len(PREFIX):].decode(errors="ignore") if event.data.startswith(PREFIX) else "";key=(get_tenant(),event.sender_id)
+ if event.data==b"rep:"+REP_LINKS.encode():t,b=await render();return await event.edit(t,buttons=b)
+ if action=="add":INPUTS[key]="title";return await event.edit("➕ عنوان لینک را ارسال کنید:\nبرای لغو `/cancel`",buttons=[[Button.inline("❌ لغو",PREFIX+b"list")]])
  if action=="list":t,b=await render();return await event.edit(t,buttons=b)
  if action.startswith("delete:"):
   try:await SERVICE.delete(int(action[7:]));t,b=await render();await event.edit(t,buttons=b);return await event.answer("حذف شد.")
