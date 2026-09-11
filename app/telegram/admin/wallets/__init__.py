@@ -1,1 +1,0 @@
-"""Admin wallets package."""

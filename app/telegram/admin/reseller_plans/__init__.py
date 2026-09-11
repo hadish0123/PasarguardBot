@@ -1,1 +1,0 @@
-"""Admin reseller plans module."""
