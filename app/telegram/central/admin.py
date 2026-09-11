@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from telethon import Button, events
 
 from app.core.exceptions import PermissionDenied
@@ -21,10 +19,12 @@ def register_central_admin_handlers(client) -> None:
     print("[central-admin] registering handlers", flush=True)
     client.add_event_handler(admin_start, events.NewMessage(pattern=r"^/admin$"))
     client.add_event_handler(admin_text, events.NewMessage(incoming=True))
-    client.add_event_handler(
-        admin_callback,
-        events.CallbackQuery(data=re.compile(rb"^central:admin:")),
-    )
+    # Do not use Telethon's data= filter here. The Bot API compatibility
+    # layer may expose callback data as bytes-like values, while Telethon's
+    # CallbackQueryBuilder performs its own filtering before our handler is
+    # called. A catch-all callback handler lets us normalize the payload and
+    # route it ourselves, which makes inline buttons reliable.
+    client.add_event_handler(admin_callback, events.CallbackQuery())
     print("[central-admin] handlers registered", flush=True)
 
 
@@ -59,12 +59,24 @@ async def admin_text(event):
 
 
 async def admin_callback(event):
-    data = event.data
+    raw_data = event.data
+    try:
+        data = bytes(raw_data or b"")
+    except (TypeError, ValueError):
+        data = b""
+
     print(f"[central-admin] CALLBACK RECEIVED sender={event.sender_id} data={data!r}", flush=True)
+
+    # This is a catch-all callback handler. Only central-admin callbacks are
+    # handled here; every other callback is left untouched for other routers.
+    if not data.startswith(PREFIX):
+        return
+
     if not is_admin(event):
         print(f"[central-admin] CALLBACK DENIED sender={event.sender_id}", flush=True)
         await event.answer("دسترسی ندارید.", alert=True)
         return
+
     await event.answer()
     try:
         if data == PREFIX + b"home":
