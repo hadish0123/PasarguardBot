@@ -10,7 +10,7 @@ def register(client,tenant_id=None):
  async def callback(event):
   async with tenant_dispatch(tenant_id):
    if not await allowed(event):return await event.answer("دسترسی به این بخش را ندارید.",alert=True)
-   await render_callback(event)
+   await event.answer();await render_callback(event)
  client.add_event_handler(callback,events.CallbackQuery(func=lambda e:bool(e.data and e.data.startswith(PREFIX))))
 async def allowed(event):
  if not event.is_private or not get_tenant():return False
