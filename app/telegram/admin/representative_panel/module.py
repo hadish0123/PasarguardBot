@@ -24,6 +24,7 @@ from app.telegram.admin.logs.messages import message_handler_log_admin
 from app.telegram.admin.manage_user.messages import msg_manage_user_admin
 from app.telegram.admin.panels.callbacks import panel_admin_callback_handler
 from app.telegram.admin.panels.service import build_panel_summary_block, display_panels
+from app.telegram.admin.plans.callbacks import inline_callback as plan_inline_callback
 from app.telegram.keyboards.customization import create_keyboard_buttons_admin_buttons
 from app.telegram.shared.url_presets import format_admin_links_message, get_bot_username
 from app.telegram.state import set_step
@@ -172,7 +173,11 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         await callback_log_admin(event)
         raise events.StopPropagation
 
-    if data.startswith(("panel_", "keyboard_", "keyboard_page", "edit_keyboard", "plan_", "Plan", "ManagePlans_", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu")):
+    if data.startswith(("Plan", "ManagePlans_", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu", "plan_", "duration_")):
+        await plan_inline_callback(event)
+        raise events.StopPropagation
+
+    if data.startswith(("panel_", "keyboard_", "keyboard_page", "edit_keyboard")):
         blocked = ("addpanel", "add_panel", "panel_add", "delete_panel", "deletePanel")
         if any(token.lower() in data.lower() for token in blocked):
             await event.answer("⛔ ثبت یا حذف پنل در ربات نماینده مجاز نیست.", alert=True)
