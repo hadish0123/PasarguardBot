@@ -96,11 +96,16 @@ async def callback(event, tenant_id):
             s.pop("awaiting_discount",None); return await render(event,int(s["plan_id"])) if s.get("plan_id") else await event.answer("جلسه خرید منقضی شده است.",alert=True)
         return await event.answer("گزینه نامعتبر است.",alert=True)
 
-async def _notify_owner(event, order, receipt_label):
+async def _notify_owner(event, order, receipt_label, photo_file_id=None):
     try:
-        owner_id=(await RepresentativeDashboardService().snapshot())["owner_id"]
-        await event.client.send_message(int(owner_id),f"🔔 **رسید پرداخت جدید**\n\n🧾 سفارش: **#{order.id}**\n👤 کاربر: `{order.telegram_user_id}`\n📦 پلن: **{order.plan_name}**\n💰 مبلغ: **{order.amount:,.0f} تومان**\n📎 رسید: {receipt_label}\n\nاز بخش «🛒 فروش و سفارش‌ها» سفارش را باز کنید و پرداخت را تأیید یا لغو کنید.")
-    except Exception: pass
+        owner_id=int((await RepresentativeDashboardService().snapshot())["owner_id"])
+        caption=(f"🔔 رسید پرداخت جدید\n\n🧾 سفارش: #{order.id}\n👤 کاربر: {order.telegram_user_id}\n📦 پلن: {order.plan_name}\n💰 مبلغ: {order.amount:,.0f} تومان\n📎 {receipt_label}\n\nاز بخش «🛒 فروش و سفارش‌ها» پرداخت را تأیید یا لغو کنید.")
+        if photo_file_id:
+            await event.client._request("sendPhoto", {"chat_id": owner_id, "photo": photo_file_id, "caption": caption})
+        else:
+            await event.client.send_message(owner_id, caption)
+    except Exception:
+        pass
 
 async def incoming(event, tenant_id):
     async with tenant_dispatch(tenant_id):
@@ -118,14 +123,15 @@ async def incoming(event, tenant_id):
         if state.get("payment_order_id") and state.get("awaiting_receipt"):
             order_id=int(state["payment_order_id"])
             try:
-                if getattr(event,"photo",None):
-                    photo=event.photo; file_id=photo[-1].get("file_id") if isinstance(photo,list) and isinstance(photo[-1],dict) else getattr(photo,"file_id",None)
+                photo_payload=(getattr(event,"_message_payload",{}) or {}).get("photo") or []
+                if photo_payload:
+                    file_id=photo_payload[-1].get("file_id")
                     if not file_id: raise ValueError("شناسه تصویر رسید پیدا نشد.")
-                    await ORDER_SERVICE.submit_payment(order_id,f"photo:{file_id}"); receipt_label="تصویر رسید"
+                    await ORDER_SERVICE.submit_payment(order_id,f"photo:{file_id}"); receipt_label="تصویر رسید"; photo_file_id=file_id
                 else:
                     if not text: return await event.respond("📎 تصویر رسید یا کد پیگیری را ارسال کنید.")
-                    await ORDER_SERVICE.submit_payment(order_id,text); receipt_label=text[:80]
-                order=await ORDER_SERVICE.get(order_id); await _notify_owner(event,order,receipt_label)
+                    await ORDER_SERVICE.submit_payment(order_id,text); receipt_label=text[:80]; photo_file_id=None
+                order=await ORDER_SERVICE.get(order_id); await _notify_owner(event,order,receipt_label,photo_file_id)
             except (LookupError,ValueError) as exc: return await event.respond(f"❌ {exc}")
             STATE.pop(key(tenant_id,event.sender_id),None)
             return await event.respond(f"✅ رسید سفارش **#{order_id}** دریافت شد.\n\n🕐 وضعیت: **در انتظار تأیید مدیریت**\nپس از تأیید، سرویس به‌صورت خودکار از پاسارگاد ساخته می‌شود و لینک اشتراک برای شما ارسال خواهد شد.",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
