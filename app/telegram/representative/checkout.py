@@ -34,7 +34,7 @@ async def render(event, plan_id):
     s = STATE.setdefault(key(get_tenant(), event.sender_id), {})
     code = s.get("code")
     subtotal = float(plan.price)
-    discount = 0
+    discount = 0.0
     if code:
         try:
             _, discount, total = await DISCOUNT_SERVICE.calculate(code, subtotal)
@@ -51,7 +51,7 @@ async def render(event, plan_id):
         f"💰 مبلغ پایه: **{subtotal:,.2f} {currency}**"
     )
     if code:
-        text += f"\n🎟 {code} · ➖ **{discount:,.2f} {currency}**"
+        text += f"\n🎟 **{code}** · ➖ **{discount:,.2f} {currency}**"
     text += f"\n\n💳 مبلغ نهایی: **{total:,.2f} {currency}**"
     await event.edit(
         text,
@@ -132,8 +132,14 @@ async def incoming(event, tenant_id):
                 item = await DISCOUNT_SERVICE.validate(text)
                 state["code"] = item.code
                 state.pop("awaiting_discount", None)
-                await event.respond(f"✅ کد **{item.code}** معتبر است.")
-                return await event.respond("برای مشاهده مبلغ نهایی، به تأیید خرید برگردید.")
+                plan_id = state.get("plan_id")
+                if not plan_id:
+                    STATE.pop(key(tenant_id, event.sender_id), None)
+                    return await event.respond("❌ جلسه خرید منقضی شد؛ دوباره از فروشگاه شروع کنید.")
+                # Re-render the same checkout immediately so the user sees the
+                # discounted amount instead of having to navigate back manually.
+                await event.respond(f"✅ کد **{item.code}** اعمال شد.")
+                return await render(event, int(plan_id))
             except (LookupError, ValueError) as exc:
                 return await event.respond(f"❌ {exc}\n\nکد دیگری ارسال کنید یا `/cancel` بزنید.")
         if state.get("payment_order_id"):
