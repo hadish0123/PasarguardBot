@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from telethon import Button, events
 
 from app.core.exceptions import PermissionDenied
@@ -18,7 +20,10 @@ PREFIX = b"central:admin:"
 def register_central_admin_handlers(client) -> None:
     client.add_event_handler(admin_start, events.NewMessage(pattern=r"^/admin$"))
     client.add_event_handler(admin_text, events.NewMessage(incoming=True))
-    client.add_event_handler(admin_callback, events.CallbackQuery(data=PREFIX))
+    client.add_event_handler(
+        admin_callback,
+        events.CallbackQuery(data=re.compile(rb"^central:admin:")),
+    )
 
 
 def is_admin(event) -> bool:
@@ -168,8 +173,8 @@ def detail_text(record) -> str:
         f"👤 مالک: `{record.owner_id}`\n"
         f"🏷 برند: {record.brand or '—'}\n"
         f"🤖 Bot ID: `{record.bot_id or '—'}`\n"
-        f"🌐 پنل: `{record.panel_url or '—'}`\n"
-        f"👤 کاربر پنل: `{record.panel_username or '—'}`\n"
+        f"🌐 پنل: `{record.panel_url or '—'}\n"
+        f"👤 کاربر پنل: `{record.panel_username or '—'}\n"
         f"📌 وضعیت: `{record.status}`\n\n"
         "🔐 Token و API Key هرگز در پنل مرکزی نمایش داده نمی‌شوند."
     )
