@@ -8,7 +8,13 @@ from app.db.models import RepresentativeSetting
 from app.db.session import SessionFactory
 from app.runtime.context import require_tenant
 
-DEFAULTS = {"brand": "", "support_username": "", "timezone": "Asia/Tehran"}
+DEFAULTS = {
+    "brand": "",
+    "support_username": "",
+    "timezone": "Asia/Tehran",
+    "payment_card_number": "",
+    "payment_card_holder": "",
+}
 
 
 class RepresentativeSettingsService:
@@ -46,6 +52,15 @@ class RepresentativeSettingsService:
                 ZoneInfo(value)
             except ZoneInfoNotFoundError as exc:
                 raise ValueError("منطقه زمانی معتبر نیست؛ مثال: Asia/Tehran") from exc
+        elif key == "payment_card_number":
+            digits = value.replace("-", "").replace(" ", "")
+            if not digits.isdigit() or len(digits) != 16:
+                raise ValueError("شماره کارت باید ۱۶ رقم باشد.")
+            value = digits
+        elif key == "payment_card_holder":
+            if len(value) > 120:
+                raise ValueError("نام صاحب کارت بیش از حد طولانی است.")
+
         tenant = require_tenant()
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
