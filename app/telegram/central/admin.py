@@ -6,10 +6,12 @@ from app.core.exceptions import PermissionDenied
 from app.db.models import RegistrationStatus
 from app.services.central_admin import CentralAdminService
 from app.services.provisioning import ProvisioningService
+from app.services.registration_store import RegistrationStore
 
 
 SERVICE = CentralAdminService()
 PROVISIONER = ProvisioningService()
+REGISTRATIONS = RegistrationStore()
 PREFIX = b"central:admin:"
 
 
@@ -72,20 +74,13 @@ async def admin_callback(event):
         if data.startswith(PREFIX + b"approve:"):
             registration_id = int(data.split(b":")[-1])
             record = await SERVICE.approve(registration_id)
-            await event.edit(
-                "⚙️ **در حال راه‌اندازی نمایندگی...**\n\n"
-                f"🆔 `{record.tracking_code}`\n"
-                "🔐 اطلاعات محرمانه فقط به‌صورت رمزنگاری‌شده نگهداری می‌شوند.\n"
-                "🤖 ربات اختصاصی نماینده در حال اتصال است..."
-            )
+            await event.edit("⚙️ **در حال راه‌اندازی نمایندگی...**\n\n🤖 ربات اختصاصی نماینده در حال اتصال است...")
             try:
                 result = await PROVISIONER.provision(record.id)
             except Exception:
                 latest = await SERVICE.get(record.id)
                 await event.edit(
-                    "❌ **راه‌اندازی ناموفق بود**\n\n"
-                    f"🆔 `{record.tracking_code}`\n"
-                    "اطلاعات ثبت‌شده حفظ شده و می‌توانید دوباره تلاش کنید.",
+                    "❌ **راه‌اندازی ناموفق بود**\n\nاطلاعات ثبت‌شده حفظ شده و می‌توانید دوباره تلاش کنید.",
                     buttons=detail_buttons(record.id, latest.status if latest else RegistrationStatus.FAILED.value),
                 )
                 return
@@ -98,38 +93,25 @@ async def admin_callback(event):
                 buttons=detail_buttons(record.id, RegistrationStatus.ACTIVE.value),
             )
             try:
-                await event.client.send_message(
-                    record.owner_id,
-                    "🎉 **ربات نمایندگی شما فعال شد!**\n\n"
-                    f"🏷 {record.brand or 'نمایندگی'}\n"
-                    f"🤖 {username}\n\n"
-                    "از این لحظه پنل مدیریت و فروشگاه اختصاصی شما آماده استفاده است.",
-                )
+                await event.client.send_message(record.owner_id, f"🎉 **ربات نمایندگی شما فعال شد!**\n\n🤖 {username}\n🏷 {record.brand or 'نمایندگی'}")
             except Exception:
                 pass
             return
         if data.startswith(PREFIX + b"retry:"):
             registration_id = int(data.split(b":")[-1])
-            await SERVICE.update(registration_id, status=RegistrationStatus.PROVISIONING.value)
-            record = await SERVICE.get(registration_id)
-            if record is None:
-                raise LookupError("registration not found")
+            record = await REGISTRATIONS.update(registration_id, status=RegistrationStatus.PROVISIONING.value)
             await event.edit("🔄 **تلاش مجدد برای راه‌اندازی...**")
             try:
                 result = await PROVISIONER.provision(record.id)
             except Exception:
                 latest = await SERVICE.get(record.id)
                 await event.edit(
-                    "❌ تلاش مجدد هم ناموفق بود.\n\nاطلاعات محفوظ است و می‌توانید دوباره تلاش کنید.",
+                    "❌ تلاش مجدد هم ناموفق بود.\n\nاطلاعات محفوظ است.",
                     buttons=detail_buttons(record.id, latest.status if latest else RegistrationStatus.FAILED.value),
                 )
                 return
             username = f"@{result.bot_username}" if result.bot_username else "ربات فعال"
-            await event.edit(
-                "✅ **راه‌اندازی با موفقیت انجام شد**\n\n"
-                f"🤖 `{username}`",
-                buttons=detail_buttons(record.id, RegistrationStatus.ACTIVE.value),
-            )
+            await event.edit("✅ **راه‌اندازی با موفقیت انجام شد**\n\n" f"🤖 `{username}`", buttons=detail_buttons(record.id, RegistrationStatus.ACTIVE.value))
             try:
                 await event.client.send_message(record.owner_id, f"🎉 ربات نمایندگی شما فعال شد: {username}")
             except Exception:
@@ -155,11 +137,7 @@ async def admin_callback(event):
 
 async def dashboard_text() -> str:
     pending = await SERVICE.pending()
-    return (
-        "🛡 **مدیریت مرکزی نمایندگان**\n\n"
-        f"⏳ درخواست‌های در انتظار: **{len(pending)}**\n\n"
-        "از این بخش درخواست‌های نمایندگی را بررسی و برای راه‌اندازی تأیید یا رد کنید."
-    )
+    return f"🛡 **مدیریت مرکزی نمایندگان**\n\n⏳ درخواست‌های در انتظار: **{len(pending)}**"
 
 
 def dashboard_buttons():
@@ -191,7 +169,7 @@ def detail_text(record) -> str:
         f"🏷 برند: {record.brand or '—'}\n"
         f"🤖 Bot ID: `{record.bot_id or '—'}`\n"
         f"🌐 پنل: `{record.panel_url or '—'}`\n"
-        f"👤 کاربر پنل: `{record.panel_username or '—'}\n'
+        f"👤 کاربر پنل: `{record.panel_username or '—'}`\n"
         f"📌 وضعیت: `{record.status}`\n\n"
         "🔐 Token و API Key هرگز در پنل مرکزی نمایش داده نمی‌شوند."
     )
