@@ -1,10 +1,8 @@
 """Stable identifiers for UI pages, callbacks and state machines."""
-
 CENTRAL_HOME = "central.home"
 CENTRAL_REGISTER = "central.register"
 CENTRAL_TRACK = "central.track"
 CENTRAL_REPRESENTATIVES = "central.representatives"
-
 REP_HOME = "rep.home"
 REP_PLANS = "rep.plans"
 REP_USERS = "rep.users"
@@ -16,7 +14,7 @@ REP_LOGS = "rep.logs"
 REP_LINKS = "rep.links"
 REP_SETTINGS = "rep.settings"
 REP_PANEL = "rep.panel"
-
+REP_SUPPORT = "rep.support"
 USER_HOME = "user.home"
 USER_SERVICES = "user.services"
 USER_WALLET = "user.wallet"
