@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Railway redeploy marker: central admin callback handler is active on this branch.
 import re
 
 from telethon import Button, events
