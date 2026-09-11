@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# Railway redeploy marker: central admin callback handler is active on this branch.
 import re
 
 from telethon import Button, events
@@ -19,12 +18,14 @@ PREFIX = b"central:admin:"
 
 
 def register_central_admin_handlers(client) -> None:
+    print("[central-admin] registering handlers", flush=True)
     client.add_event_handler(admin_start, events.NewMessage(pattern=r"^/admin$"))
     client.add_event_handler(admin_text, events.NewMessage(incoming=True))
     client.add_event_handler(
         admin_callback,
         events.CallbackQuery(data=re.compile(rb"^central:admin:")),
     )
+    print("[central-admin] handlers registered", flush=True)
 
 
 def is_admin(event) -> bool:
@@ -32,6 +33,7 @@ def is_admin(event) -> bool:
 
 
 async def admin_start(event):
+    print(f"[central-admin] /admin received sender={event.sender_id}", flush=True)
     if not is_admin(event):
         return
     await event.respond(await dashboard_text(), buttons=dashboard_buttons())
@@ -57,10 +59,12 @@ async def admin_text(event):
 
 
 async def admin_callback(event):
+    data = event.data
+    print(f"[central-admin] CALLBACK RECEIVED sender={event.sender_id} data={data!r}", flush=True)
     if not is_admin(event):
+        print(f"[central-admin] CALLBACK DENIED sender={event.sender_id}", flush=True)
         await event.answer("دسترسی ندارید.", alert=True)
         return
-    data = event.data
     await event.answer()
     try:
         if data == PREFIX + b"home":
@@ -137,7 +141,8 @@ async def admin_callback(event):
         await event.edit("❌ درخواست نامعتبر یا منقضی شده است.", buttons=dashboard_buttons())
     except PermissionDenied:
         await event.answer("دسترسی ندارید.", alert=True)
-    except Exception:
+    except Exception as exc:
+        print(f"[central-admin] CALLBACK ERROR: {type(exc).__name__}: {exc}", flush=True)
         await event.edit("❌ عملیات انجام نشد. دوباره تلاش کنید.", buttons=dashboard_buttons())
 
 
