@@ -64,9 +64,12 @@ class OrderService:
    old=order.status;order.status=status;await session.commit();await session.refresh(order)
   if status=="paid":
    try:
-    from app.services.subscriptions import SERVICE as SUBSCRIPTION_SERVICE
-    await SUBSCRIPTION_SERVICE.ensure_for_paid_order(order.id)
+    from app.services.pasarguard_provisioning import PasarguardProvisioningService
+    subscription=await PasarguardProvisioningService().provision_paid_order(order.id)
+    await LOG_SERVICE.add("order.provisioned",f"order=#{order.id} provider_id={subscription.provider_service_id or '-'}")
+   except ValueError as exc:
+    await LOG_SERVICE.add("order.provisioning_pending",f"order=#{order.id} reason={exc}")
    except Exception as exc:
-    await LOG_SERVICE.add("order.subscription_prepare_failed",f"order=#{order.id} error={exc}")
+    await LOG_SERVICE.add("order.provisioning_failed",f"order=#{order.id} error={exc}")
   await LOG_SERVICE.add("order.status_changed",f"order=#{order_id} {old}->{status}");return order
 SERVICE=OrderService()
