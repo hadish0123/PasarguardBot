@@ -1,18 +1,82 @@
 from __future__ import annotations
 
-from telethon import Button
+from telethon import Button, events
 
+from app.core.ids import REP_DASHBOARD, REP_DISCOUNTS, REP_LINKS, REP_LOGS, REP_ORDERS, REP_PLANS, REP_SALES, REP_SETTINGS, REP_TEXTS, REP_USERS
+from app.services.representative_dashboard import RepresentativeDashboardService
+from app.runtime.context import get_tenant
+
+
+SERVICE = RepresentativeDashboardService()
+PREFIX = b"rep:"
 
 ADMIN_MENU = [
-    [Button.inline("📊 داشبورد", b"rep:dashboard")],
-    [Button.inline("🗂 مدیریت پلن‌ها", b"rep:plans"), Button.inline("👥 کاربران", b"rep:users")],
-    [Button.inline("🛒 فروش و سفارش‌ها", b"rep:orders")],
-    [Button.inline("🎟 تخفیف‌ها", b"rep:discounts"), Button.inline("⚙️ تنظیمات فروش", b"rep:sales")],
-    [Button.inline("📝 متن‌ها و دکمه‌ها", b"rep:texts")],
-    [Button.inline("📋 لاگ‌ها", b"rep:logs"), Button.inline("🔗 لینک‌ها", b"rep:links")],
-    [Button.inline("⚙️ تنظیمات نماینده", b"rep:settings")],
+    [Button.inline("📊 داشبورد", PREFIX + REP_DASHBOARD.encode())],
+    [Button.inline("🗂 مدیریت پلن‌ها", PREFIX + REP_PLANS.encode()), Button.inline("👥 کاربران", PREFIX + REP_USERS.encode())],
+    [Button.inline("🛒 فروش و سفارش‌ها", PREFIX + REP_ORDERS.encode())],
+    [Button.inline("🎟 تخفیف‌ها", PREFIX + REP_DISCOUNTS.encode()), Button.inline("⚙️ تنظیمات فروش", PREFIX + REP_SALES.encode())],
+    [Button.inline("📝 متن‌ها و دکمه‌ها", PREFIX + REP_TEXTS.encode())],
+    [Button.inline("📋 لاگ‌ها", PREFIX + REP_LOGS.encode()), Button.inline("🔗 لینک‌ها", PREFIX + REP_LINKS.encode())],
+    [Button.inline("⚙️ تنظیمات نماینده", PREFIX + REP_SETTINGS.encode())],
 ]
 
 
+def register(client) -> None:
+    client.add_event_handler(show_admin, events.NewMessage(pattern=r"^/admin$"))
+    client.add_event_handler(admin_callback, events.CallbackQuery(data=PREFIX))
+
+
+async def _authorized(event) -> bool:
+    if not event.is_private or not get_tenant():
+        return False
+    return await SERVICE.is_owner(event.sender_id)
+
+
+async def dashboard_text() -> str:
+    data = await SERVICE.snapshot()
+    bot = f"@{data['bot_username']}" if data["bot_username"] else "در حال شناسایی"
+    return (
+        "📊 **داشبورد نماینده**\n\n"
+        f"🏷 برند: **{data['brand']}**\n"
+        f"🤖 ربات: **{bot}**\n"
+        "🟢 وضعیت: **فعال**\n\n"
+        "از منوی زیر مدیریت فروشگاه و سرویس‌های نمایندگی را انجام دهید."
+    )
+
+
 async def show_admin(event) -> None:
-    await event.respond("🛠 **پنل مدیریت نماینده**", buttons=ADMIN_MENU)
+    if not await _authorized(event):
+        return
+    await event.respond(await dashboard_text(), buttons=ADMIN_MENU)
+
+
+async def admin_callback(event) -> None:
+    if not await _authorized(event):
+        await event.answer("دسترسی مدیریت ندارید.", alert=True)
+        return
+    action = event.data[len(PREFIX):].decode(errors="ignore")
+    if action == REP_DASHBOARD:
+        await event.edit(await dashboard_text(), buttons=ADMIN_MENU)
+        await event.answer()
+        return
+    labels = {
+        REP_PLANS: "🗂 مدیریت پلن‌ها",
+        REP_USERS: "👥 کاربران",
+        REP_ORDERS: "🛒 فروش و سفارش‌ها",
+        REP_DISCOUNTS: "🎟 تخفیف‌ها",
+        REP_SALES: "⚙️ تنظیمات فروش",
+        REP_TEXTS: "📝 متن‌ها و دکمه‌ها",
+        REP_LOGS: "📋 لاگ‌ها",
+        REP_LINKS: "🔗 لینک‌ها",
+        REP_SETTINGS: "⚙️ تنظیمات نماینده",
+    }
+    if action in labels:
+        await event.edit(
+            f"{labels[action]}\n\n"
+            "این بخش در مرحله بعدی معماری نمایندگی به‌صورت کامل فعال می‌شود.\n"
+            "🔙 برای بازگشت، داشبورد را بزنید.",
+            buttons=[[Button.inline("📊 داشبورد", PREFIX + REP_DASHBOARD.encode())]],
+        )
+        await event.answer()
+        return
+    await event.answer("گزینه نامعتبر است.", alert=True)
