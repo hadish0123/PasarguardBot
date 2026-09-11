@@ -19,7 +19,6 @@ class RepresentativeRuntime:
 
     def register(self) -> None:
         self.client.add_event_handler(self._start, events.NewMessage(pattern=r"^/start$"))
-        self.client.add_event_handler(self._admin_start, events.NewMessage(pattern=r"^/admin$"))
         from app.telegram.representative.admin import register as register_admin
         from app.telegram.representative.plans import register as register_plans
         register_admin(self.client, self.tenant_id)
@@ -33,12 +32,6 @@ class RepresentativeRuntime:
                 return
             from app.telegram.representative.user import USER_MENU
             await event.respond("🏪 **فروشگاه**\n\nبه فروشگاه نمایندگی خوش آمدید. از گزینه‌های زیر شروع کنید.", buttons=USER_MENU)
-
-    async def _admin_start(self, event):
-        async with tenant_dispatch(self.tenant_id):
-            if not await self.dashboard.is_owner(event.sender_id): return
-            from app.telegram.representative.admin import dashboard_text, ADMIN_MENU
-            await event.respond(await dashboard_text(), buttons=ADMIN_MENU)
 
     async def start(self) -> None:
         if self.is_running: return
