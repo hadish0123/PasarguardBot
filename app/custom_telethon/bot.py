@@ -13,28 +13,96 @@ from . import events
 from .button import _Button
 
 
+def _serialize_button(button):
+    """Convert both project Bot API buttons and Telethon TL buttons to JSON-safe Bot API dicts."""
+    if isinstance(button, dict):
+        return {k: _serialize_value(v) for k, v in button.items()}
+    if isinstance(button, _Button):
+        return button.to_dict()
+
+    name = button.__class__.__name__
+    text = getattr(button, "text", "")
+    if name in {"KeyboardButtonCallback", "ButtonCallback"}:
+        data = getattr(button, "data", b"")
+        if isinstance(data, bytes):
+            data = data.decode("utf-8", errors="replace")
+        return {"text": text, "callback_data": data}
+    if name in {"KeyboardButtonUrl", "ButtonUrl"}:
+        return {"text": text, "url": getattr(button, "url", "")}
+    if name in {"KeyboardButtonRequestPhone", "ButtonRequestPhone"}:
+        return {"text": text, "request_contact": True}
+    if name in {"KeyboardButtonRequestGeoLocation", "ButtonRequestGeoLocation"}:
+        return {"text": text, "request_location": True}
+    if name in {"KeyboardButtonSimpleWebView", "ButtonWebView"}:
+        url = getattr(button, "url", None) or getattr(getattr(button, "url", None), "url", None)
+        if url:
+            return {"text": text, "web_app": {"url": url}}
+        return {"text": text}
+    if name.startswith("KeyboardButton") or name.startswith("Button"):
+        return {"text": text}
+
+    if hasattr(button, "to_dict"):
+        try:
+            value = button.to_dict()
+            return _serialize_value(value)
+        except Exception:
+            pass
+    return button
+
+
+def _serialize_value(value):
+    if isinstance(value, dict):
+        return {k: _serialize_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialize_value(v) for v in value]
+    if isinstance(value, _Button):
+        return value.to_dict()
+    if hasattr(value, "to_dict"):
+        try:
+            return _serialize_value(value.to_dict())
+        except Exception:
+            pass
+    return _serialize_button(value) if value.__class__.__name__.startswith(("KeyboardButton", "Button")) else value
+
+
 def _button_markup(buttons):
     if not buttons:
         return None
     if isinstance(buttons, dict):
-        return buttons
+        return _serialize_value(buttons)
+
+    # Accept Telethon ReplyInlineMarkup / ReplyKeyboardMarkup directly.
+    markup_name = buttons.__class__.__name__
+    if markup_name in {"ReplyInlineMarkup", "ReplyKeyboardMarkup"}:
+        rows = getattr(buttons, "rows", []) or []
+        buttons = [getattr(row, "buttons", []) for row in rows]
+        if markup_name == "ReplyInlineMarkup":
+            return {"inline_keyboard": [[_serialize_button(b) for b in row] for row in buttons]}
+        return {"keyboard": [[_serialize_button(b) for b in row] for row in buttons], "resize_keyboard": True}
+
     if isinstance(buttons, _Button):
         buttons = [[buttons]]
     elif isinstance(buttons, (list, tuple)) and buttons and not isinstance(buttons[0], (list, tuple)):
         buttons = [list(buttons)]
+
     rows = []
     for row in buttons:
+        if hasattr(row, "buttons") and not isinstance(row, (list, tuple)):
+            row = row.buttons
         if isinstance(row, _Button):
             row = [row]
         out = []
         for b in row:
-            if isinstance(b, dict):
-                out.append(b)
-            elif hasattr(b, "to_dict"):
-                out.append(b.to_dict())
+            converted = _serialize_button(b)
+            if isinstance(converted, dict):
+                out.append(converted)
         if out:
             rows.append(out)
-    return {"inline_keyboard": rows} if rows and all("callback_data" in b or "url" in b for r in rows for b in r) else {"keyboard": rows, "resize_keyboard": True}
+
+    if not rows:
+        return None
+    inline = all("callback_data" in b or "url" in b for r in rows for b in r)
+    return {"inline_keyboard": rows} if inline else {"keyboard": rows, "resize_keyboard": True}
 
 
 def _chat_id(value):
@@ -67,6 +135,10 @@ class _Message:
         if name in self._data:
             return self._data[name]
         raise AttributeError(name)
+
+    async def get_sender(self):
+        sender = self._data.get("from") or {}
+        return SimpleNamespace(**sender)
 
     async def reply(self, message=None, **kwargs):
         return await self._client.send_message(self.chat_id, message or "", **kwargs)
@@ -221,7 +293,7 @@ class TelegramClient:
     async def _api(self, method, **params):
         if not self._session:
             raise RuntimeError("Telegram client is not started")
-        clean = {k: v for k, v in params.items() if v is not None}
+        clean = {k: _serialize_value(v) for k, v in params.items() if v is not None}
         url = f"https://api.telegram.org/bot{self._token}/{method}"
         async with self._session.post(url, json=clean, timeout=aiohttp.ClientTimeout(total=60)) as response:
             payload = await response.json(content_type=None)
