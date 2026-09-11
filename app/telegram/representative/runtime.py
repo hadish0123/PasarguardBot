@@ -26,7 +26,8 @@ class RepresentativeRuntime:
         from app.telegram.representative.wallet import register as w
         from app.telegram.representative.profile import register as pr
         from app.telegram.representative.discount_user import register as du
-        a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); c(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id)
+        from app.telegram.representative.trial import register as tr
+        a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); c(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id)
     async def _start(self,event):
         async with tenant_dispatch(self.tenant_id):
             if await self.dashboard.is_owner(event.sender_id):
