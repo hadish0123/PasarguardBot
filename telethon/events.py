@@ -20,11 +20,27 @@ class NewMessage:
 
 @dataclass(slots=True)
 class CallbackQuery:
-    data: bytes | str | None = None
+    data: bytes | str | Any | None = None
 
     def matches(self, event: Any) -> bool:
         if self.data is None:
             return True
+
         actual = getattr(event, "data", b"")
         expected = self.data.encode() if isinstance(self.data, str) else self.data
+
+        # Support both exact callback data and regex/pattern matchers. The
+        # application uses compiled regexes for namespaced callback routers;
+        # comparing the regex object directly to bytes can never match.
+        if hasattr(expected, "search"):
+            try:
+                return bool(expected.search(actual))
+            except TypeError:
+                try:
+                    return bool(expected.search(actual.decode("utf-8", errors="replace")))
+                except (AttributeError, UnicodeDecodeError):
+                    return False
+
+        if isinstance(actual, str):
+            actual = actual.encode("utf-8")
         return actual == expected
