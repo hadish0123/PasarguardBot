@@ -58,9 +58,28 @@ async def _tenant_panel():
     return await PanelsManager().get_panel_by_code(tenant.registration_id)
 
 
+async def _tenant_panel_code() -> int | None:
+    panel = await _tenant_panel()
+    return int(panel.code) if panel else None
+
+
+async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
+    """Show only the already-provisioned representative panel for plan actions."""
+    panel = await _tenant_panel()
+    if not panel:
+        await event.answer("❌ پنل نماینده پیدا نشد.", alert=True)
+        return
+
+    action = "ManagePlans" if manage else "AddPlans"
+    title = "مدیریت پلن‌های پنل نماینده" if manage else "ساخت پلن برای پنل نماینده"
+    buttons = [[Button.inline(f"{'✅' if panel.enable == 1 else '❌'} {panel.name}", data=f"{action}_{panel.code}")]]
+    buttons.append([Button.inline("🔙 بازگشت", data="BackToPlanMainMenu")])
+    await event.edit(f"🗞 **{title}**\n\nفقط پنل متصل به همین نماینده قابل انتخاب است.", buttons=buttons, parse_mode="md")
+
+
 async def _show_plan_menu(event):
     await event.respond(
-        "🗞 **مدیریت پلن‌ها**\n\nپلن‌ها فقط برای پنل نماینده فعلی مدیریت می‌شوند.\nپنل جدید از این ربات قابل ثبت نیست.",
+        "🗞 **مدیریت پلن‌ها**\n\nپلن‌ها فقط برای پنل نماینده فعلی مدیریت می‌شوند.\nثبت یا حذف پنل از این بخش مجاز نیست.",
         buttons=[
             [Button.inline("➕ ساخت پلن جدید", data="PlanAddSelectPanel")],
             [Button.inline("📋 مدیریت پلن‌ها", data="PlanManageSelectPanel")],
@@ -162,6 +181,23 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         await _show_sales_menu(event)
         raise events.StopPropagation
 
+    if data == "PlanAddSelectPanel":
+        await _show_rep_plan_panel_selector(event, manage=False)
+        raise events.StopPropagation
+
+    if data == "PlanManageSelectPanel":
+        await _show_rep_plan_panel_selector(event, manage=True)
+        raise events.StopPropagation
+
+    if data.startswith("AddPlans_") or data.startswith("ManagePlans_"):
+        panel_code = int(data.split("_", 1)[1])
+        tenant_code = await _tenant_panel_code()
+        if tenant_code is None or panel_code != tenant_code:
+            await event.answer("⛔️ فقط پنل متصل به همین نماینده قابل مدیریت است.", alert=True)
+            raise events.StopPropagation
+        await plan_inline_callback(event)
+        raise events.StopPropagation
+
     if data == "rep_keyboard_page:1":
         await event.edit("📝 **دکمه‌های منوی کاربر**", buttons=await create_keyboard_buttons_admin_buttons(1), parse_mode="md")
         raise events.StopPropagation
@@ -178,12 +214,12 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         await callback_manage_user_admin(event)
         raise events.StopPropagation
 
-    if data.startswith(("Plan", "ManagePlans_", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu", "plan_", "duration_")):
+    if data.startswith(("Plan", "PrevPlan:", "NextPlan:", "BackToPlanMainMenu", "plan_", "duration_", "ManagePlans_", "AddPlans_")):
         await plan_inline_callback(event)
         raise events.StopPropagation
 
     if data.startswith(("panel_", "keyboard_", "keyboard_page", "edit_keyboard")):
-        blocked = ("addpanel", "add_panel", "panel_add", "delete_panel", "deletePanel")
+        blocked = ("addpanel", "add_panel", "panel_add", "delete_panel", "deletePanel", "panel_delete")
         if any(token.lower() in data.lower() for token in blocked):
             await event.answer("⛔ ثبت یا حذف پنل در ربات نماینده مجاز نیست.", alert=True)
             raise events.StopPropagation
