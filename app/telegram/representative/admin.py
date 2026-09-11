@@ -17,7 +17,7 @@ async def show_admin(event):
  if await _authorized(event): await event.respond(await dashboard_text(),buttons=ADMIN_MENU)
 async def admin_callback(event):
  if not await _authorized(event): return await event.answer("دسترسی مدیریت ندارید.",alert=True)
- if event.data.startswith((b"rep:plans:",b"rep:users:",b"rep:orders:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:")): return
+ if event.data.startswith((b"rep:plans:",b"rep:users:",b"rep:orders:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:",b"rep:links:")): return
  action=event.data[len(PREFIX):].decode(errors="ignore")
  if action==REP_HOME: await event.edit(await dashboard_text(),buttons=ADMIN_MENU); return await event.answer()
  if action==REP_PLANS:
@@ -41,6 +41,8 @@ async def admin_callback(event):
  if action==REP_LOGS:
   from app.telegram.representative.logs import render
   t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
- labels={REP_LINKS:'🔗 لینک‌ها',REP_SETTINGS:'⚙️ تنظیمات نماینده'}
- if action in labels: await event.edit(f"{labels[action]}\n\nاین صفحه در مرحله بعدی پیاده‌سازی می‌شود.",buttons=[[Button.inline("📊 داشبورد",PREFIX+REP_HOME.encode())]]); return await event.answer()
+ if action==REP_LINKS:
+  from app.telegram.representative.links import render
+  t,b=await render(); await event.edit(t,buttons=b); return await event.answer()
+ if action==REP_SETTINGS: await event.answer("تنظیمات نماینده در صفحه بعدی فعال می‌شود.",alert=True); return
  await event.answer("گزینه نامعتبر است.",alert=True)
