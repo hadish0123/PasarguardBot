@@ -116,13 +116,7 @@ class _Event:
 
     async def edit(self, text: str = "", *, buttons=None, **kwargs):
         if self._callback and self._message_payload.get("message_id"):
-            return await self.client.edit_message(
-                self.chat_id,
-                self._message_payload["message_id"],
-                text,
-                buttons=buttons,
-                **kwargs,
-            )
+            return await self.client.edit_message(self.chat_id, self._message_payload["message_id"], text, buttons=buttons, **kwargs)
         if self.message and self.message.id:
             return await self.client.edit_message(self.chat_id, self.message.id, text, buttons=buttons, **kwargs)
         return None
@@ -144,12 +138,7 @@ class _Event:
 
 
 class TelegramClient:
-    """Small Telethon-compatible facade backed exclusively by Telegram Bot API.
-
-    It intentionally implements only the API surface used by this project, so
-    application handlers keep their existing structure while API_ID/API_HASH
-    are no longer required.
-    """
+    """Small Telethon-compatible facade backed exclusively by Telegram Bot API."""
 
     def __init__(self, session: str, api_id: int | None = None, api_hash: str | None = None, **_: Any):
         self.session = session
@@ -161,6 +150,7 @@ class TelegramClient:
         self._handlers: list[tuple[Any, Any]] = []
         self._stop = asyncio.Event()
         self._me: _Sender | None = None
+        self._bot_message_ids: dict[int, set[int]] = {}
 
     def add_event_handler(self, callback, event):
         self._handlers.append((callback, event))
@@ -174,9 +164,7 @@ class TelegramClient:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35))
         me = await self._request("getMe")
-        self._me = _Sender(
-            id=int(me["id"]), first_name=me.get("first_name"), username=me.get("username")
-        )
+        self._me = _Sender(id=int(me["id"]), first_name=me.get("first_name"), username=me.get("username"))
         return self
 
     async def _request(self, method: str, payload: dict[str, Any] | None = None):
@@ -209,28 +197,60 @@ class TelegramClient:
                 rows.append(row_out)
         return {"inline_keyboard": rows} if rows else None
 
+    def _remember_bot_message(self, chat_id: int | None, message: dict[str, Any] | None):
+        if chat_id is None or not message or not message.get("message_id"):
+            return
+        self._bot_message_ids.setdefault(int(chat_id), set()).add(int(message["message_id"]))
+
+    def _forget_bot_message(self, chat_id: int | None, message_id: int | None):
+        if chat_id is None or message_id is None:
+            return
+        ids = self._bot_message_ids.get(int(chat_id))
+        if not ids:
+            return
+        ids.discard(int(message_id))
+        if not ids:
+            self._bot_message_ids.pop(int(chat_id), None)
+
+    async def clear_bot_messages(self, chat_id: int | None):
+        ids = list(self._bot_message_ids.get(int(chat_id), set())) if chat_id is not None else []
+        if not ids:
+            return
+        self._bot_message_ids.pop(int(chat_id), None)
+        await asyncio.gather(
+            *(self._request("deleteMessage", {"chat_id": chat_id, "message_id": mid}) for mid in ids),
+            return_exceptions=True,
+        )
+
     async def send_message(self, entity, message: str = "", *, buttons=None, **kwargs):
         payload = {"chat_id": entity, "text": message}
         keyboard = self._keyboard(buttons)
         if keyboard:
             payload["reply_markup"] = keyboard
-        if kwargs.get("parse_mode"):
-            payload["parse_mode"] = kwargs["parse_mode"]
-        else:
-            payload["parse_mode"] = "Markdown"
-        return await self._request("sendMessage", payload)
+        payload["parse_mode"] = kwargs.get("parse_mode", "Markdown")
+        result = await self._request("sendMessage", payload)
+        self._remember_bot_message(int(entity) if entity is not None else None, result)
+        return result
 
     async def edit_message(self, entity, message_id: int, text: str, *, buttons=None, **kwargs):
         payload = {"chat_id": entity, "message_id": message_id, "text": text, "parse_mode": kwargs.get("parse_mode", "Markdown")}
         keyboard = self._keyboard(buttons)
         if keyboard:
             payload["reply_markup"] = keyboard
-        return await self._request("editMessageText", payload)
+        result = await self._request("editMessageText", payload)
+        self._remember_bot_message(int(entity) if entity is not None else None, result or {"message_id": message_id})
+        return result
 
     async def delete_messages(self, entity, message_ids):
-        if isinstance(message_ids, (list, tuple)):
-            return [await self._request("deleteMessage", {"chat_id": entity, "message_id": mid}) for mid in message_ids]
-        return await self._request("deleteMessage", {"chat_id": entity, "message_id": message_ids})
+        ids = message_ids if isinstance(message_ids, (list, tuple)) else [message_ids]
+        results = await asyncio.gather(
+            *(self._request("deleteMessage", {"chat_id": entity, "message_id": mid}) for mid in ids),
+            return_exceptions=True,
+        )
+        for mid, result in zip(ids, results):
+            if not isinstance(result, Exception):
+                self._forget_bot_message(entity, mid)
+        return results if isinstance(message_ids, (list, tuple)) else results[0]
 
     async def get_me(self):
         result = await self._request("getMe")
@@ -263,7 +283,6 @@ class TelegramClient:
                     raise
                 except Exception:
                     logger.debug("Fast callback acknowledgement failed", exc_info=True)
-
             auto_ack = asyncio.create_task(acknowledge_quickly(), name="telegram-fast-callback-ack")
         try:
             for callback, builder in list(self._handlers):
