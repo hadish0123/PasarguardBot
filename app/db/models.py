@@ -50,6 +50,7 @@ class RepresentativeRegistration(Base):
     panel_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     panel_username: Mapped[str | None] = mapped_column(String(190), nullable=True)
     panel_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     step: Mapped[str] = mapped_column(String(24), default=RegistrationStep.BRAND.value)
     status: Mapped[str] = mapped_column(String(24), default=RegistrationStatus.DRAFT.value, index=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
