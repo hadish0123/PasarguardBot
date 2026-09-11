@@ -173,8 +173,8 @@ def detail_text(record) -> str:
         f"👤 مالک: `{record.owner_id}`\n"
         f"🏷 برند: {record.brand or '—'}\n"
         f"🤖 Bot ID: `{record.bot_id or '—'}`\n"
-        f"🌐 پنل: `{record.panel_url or '—'}\n"
-        f"👤 کاربر پنل: `{record.panel_username or '—'}\n"
+        f"🌐 پنل: `{record.panel_url or '—'}`\n"
+        f"👤 کاربر پنل: `{record.panel_username or '—'}`\n"
         f"📌 وضعیت: `{record.status}`\n\n"
         "🔐 Token و API Key هرگز در پنل مرکزی نمایش داده نمی‌شوند."
     )
