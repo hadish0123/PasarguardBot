@@ -55,9 +55,20 @@ class RepresentativeRuntime:
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
+            # Keep the user chat clean: remove the bot's previous menu/messages
+            # and the /start message before rendering the new home. Telegram
+            # allows bots to delete their own outgoing messages and incoming
+            # private-chat messages, subject to Telegram's deletion limits.
+            await asyncio.gather(
+                self.client.clear_bot_messages(event.chat_id),
+                event.delete(),
+                return_exceptions=True,
+            )
+
             if await self.dashboard.is_owner(event.sender_id):
                 from app.telegram.representative.admin import dashboard_text, ADMIN_MENU
                 return await event.respond(await dashboard_text(), buttons=ADMIN_MENU)
+
             user = await USER_SERVICE.upsert_from_sender(await event.get_sender())
             if user.blocked:
                 return await event.respond(await TEXT_SERVICE.get("blocked_user"))
@@ -67,8 +78,10 @@ class RepresentativeRuntime:
                     await REFERRAL_SERVICE.attach(int(ref_arg.strip()[4:]), event.sender_id)
                 except (ValueError, LookupError):
                     pass
+
+            values = await TEXT_SERVICE.all()
             from app.telegram.representative.navigation import customer_menu
-            await event.respond(await TEXT_SERVICE.get("welcome"), buttons=await customer_menu())
+            await event.respond(values["welcome"], buttons=await customer_menu(values))
 
     async def start(self):
         if self.is_running:
