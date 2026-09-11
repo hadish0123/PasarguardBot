@@ -32,6 +32,7 @@ class RepresentativeRuntime:
         from app.telegram.representative.panel import register as h
         from app.telegram.representative.user import register as c
         from app.telegram.representative.user_services import register as us
+        from app.telegram.representative.wallet import register as w
         a(self.client, self.tenant_id)
         p(self.client, self.tenant_id)
         u(self.client, self.tenant_id)
@@ -45,6 +46,7 @@ class RepresentativeRuntime:
         h(self.client, self.tenant_id)
         c(self.client, self.tenant_id)
         us(self.client, self.tenant_id)
+        w(self.client, self.tenant_id)
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
