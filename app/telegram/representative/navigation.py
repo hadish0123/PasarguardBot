@@ -21,6 +21,8 @@ async def register_handler(event, tenant_id):
         if not user or user.blocked:
             return await event.answer("دسترسی ندارید.", alert=True)
         data = event.data or b""
+        # Acknowledge valid navigation callbacks before doing database/text work.
+        await event.answer()
         if data == HOME:
             return await event.edit(
                 await TEXT_SERVICE.get("shop_title") + "\n\n" + await TEXT_SERVICE.get("shop_hint"),
