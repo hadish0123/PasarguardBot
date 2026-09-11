@@ -28,15 +28,10 @@ class RegistrationStore:
                 .where(
                     RepresentativeRegistration.owner_id == owner_id,
                     RepresentativeRegistration.status.in_(
-                        (
-                            RegistrationStatus.DRAFT.value,
-                            RegistrationStatus.PENDING.value,
-                            RegistrationStatus.PROVISIONING.value,
-                        )
+                        (RegistrationStatus.DRAFT.value, RegistrationStatus.PENDING.value, RegistrationStatus.PROVISIONING.value)
                     ),
                 )
-                .order_by(RepresentativeRegistration.id.desc())
-                .limit(1)
+                .order_by(RepresentativeRegistration.id.desc()).limit(1)
             )
             existing = result.scalar_one_or_none()
             if existing is not None:
@@ -54,25 +49,26 @@ class RegistrationStore:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            result = await session.execute(
-                select(RepresentativeRegistration).where(
-                    RepresentativeRegistration.owner_id == owner_id,
-                    RepresentativeRegistration.tracking_code == tracking_code.strip().upper(),
-                )
-            )
+            result = await session.execute(select(RepresentativeRegistration).where(
+                RepresentativeRegistration.owner_id == owner_id,
+                RepresentativeRegistration.tracking_code == tracking_code.strip().upper(),
+            ))
             return result.scalar_one_or_none()
 
     async def latest_for_owner(self, owner_id: int) -> RepresentativeRegistration | None:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            result = await session.execute(
-                select(RepresentativeRegistration)
+            result = await session.execute(select(RepresentativeRegistration)
                 .where(RepresentativeRegistration.owner_id == owner_id)
-                .order_by(RepresentativeRegistration.id.desc())
-                .limit(1)
-            )
+                .order_by(RepresentativeRegistration.id.desc()).limit(1))
             return result.scalar_one_or_none()
+
+    async def get(self, record_id: int) -> RepresentativeRegistration | None:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            return await session.get(RepresentativeRegistration, record_id)
 
     async def update(self, record_id: int, **values) -> RepresentativeRegistration:
         if SessionFactory is None:
@@ -93,8 +89,14 @@ class RegistrationStore:
     async def mark_pending(self, record_id: int) -> None:
         await self.update(record_id, status=RegistrationStatus.PENDING.value, step=RegistrationStep.COMPLETE.value)
 
-    async def mark_active(self, record_id: int) -> None:
-        await self.update(record_id, status=RegistrationStatus.ACTIVE.value)
+    async def mark_provisioning(self, record_id: int) -> None:
+        await self.update(record_id, status=RegistrationStatus.PROVISIONING.value)
+
+    async def mark_active(self, record_id: int, tenant_id: str) -> None:
+        await self.update(record_id, status=RegistrationStatus.ACTIVE.value, tenant_id=tenant_id)
+
+    async def mark_failed(self, record_id: int, reason: str) -> None:
+        await self.update(record_id, status=RegistrationStatus.FAILED.value, rejection_reason=reason[:2000])
 
     async def mark_rejected(self, record_id: int, reason: str | None = None) -> None:
         await self.update(record_id, status=RegistrationStatus.REJECTED.value, rejection_reason=reason)
