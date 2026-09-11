@@ -35,13 +35,7 @@ async def _authorized(event) -> bool:
 async def dashboard_text() -> str:
     data = await SERVICE.snapshot()
     bot = f"@{data['bot_username']}" if data["bot_username"] else "در حال شناسایی"
-    return (
-        "📊 **داشبورد نماینده**\n\n"
-        f"🏷 برند: **{data['brand']}**\n"
-        f"🤖 ربات: **{bot}**\n"
-        "🟢 وضعیت: **فعال**\n\n"
-        "از منوی زیر مدیریت فروشگاه و سرویس‌های نمایندگی را انجام دهید."
-    )
+    return f"📊 **داشبورد نماینده**\n\n🏷 برند: **{data['brand']}**\n🤖 ربات: **{bot}**\n🟢 وضعیت: **فعال**\n\nاز منوی زیر مدیریت فروشگاه و سرویس‌های نمایندگی را انجام دهید."
 
 
 async def show_admin(event) -> None:
@@ -53,6 +47,8 @@ async def show_admin(event) -> None:
 async def admin_callback(event) -> None:
     if not await _authorized(event):
         await event.answer("دسترسی مدیریت ندارید.", alert=True)
+        return
+    if event.data.startswith(b"rep:plans:"):
         return
     action = event.data[len(PREFIX):].decode(errors="ignore")
     if action == REP_HOME:
@@ -70,12 +66,14 @@ async def admin_callback(event) -> None:
         REP_LINKS: "🔗 لینک‌ها",
         REP_SETTINGS: "⚙️ تنظیمات نماینده",
     }
+    if action == REP_PLANS:
+        from app.telegram.representative.plans import render
+        text, buttons = await render()
+        await event.edit(text, buttons=buttons)
+        await event.answer()
+        return
     if action in labels:
-        await event.edit(
-            f"{labels[action]}\n\n"
-            "این بخش در مرحله بعدی معماری نمایندگی به‌صورت کامل فعال می‌شود.",
-            buttons=[[Button.inline("📊 داشبورد", PREFIX + REP_HOME.encode())]],
-        )
+        await event.edit(f"{labels[action]}\n\nاین بخش در مرحله بعدی معماری نمایندگی به‌صورت کامل فعال می‌شود.", buttons=[[Button.inline("📊 داشبورد", PREFIX + REP_HOME.encode())]])
         await event.answer()
         return
     await event.answer("گزینه نامعتبر است.", alert=True)
