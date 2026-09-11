@@ -13,9 +13,6 @@ def key(t,u): return (t,int(u))
 async def allowed(event):
  if not event.is_private or not get_tenant(): return False
  u=await USER_SERVICE.get_by_telegram_id(event.sender_id); return bool(u and not u.blocked)
-def stop():
- from telethon.events.common import StopPropagation
- raise StopPropagation
 async def render(event,plan_id):
  plan=next((p for p in await PlanService().list() if p.id==plan_id and p.enabled),None)
  if not plan:return await event.answer("این پلن دیگر فعال نیست.",alert=True)
@@ -66,8 +63,7 @@ async def incoming(event,tenant_id):
    else:status="در انتظار تأیید مدیریت"
    return await event.respond(f"✅ پرداخت سفارش **#{o.id}** ثبت شد.\n\n💳 **{o.amount:,.2f} {currency}**\n🕐 وضعیت: **{status}**",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
 def register(client,tenant_id):
- async def cb(event):
-  await callback(event)
- async def msg(event):
-  await incoming(event,tenant_id)
- client.add_event_handler(cb,events.CallbackQuery(data=PREFIX));client.add_event_handler(msg,events.NewMessage(incoming=True))
+ async def cb(event): await callback(event)
+ async def msg(event): await incoming(event,tenant_id)
+ client.add_event_handler(cb,events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
+ client.add_event_handler(msg,events.NewMessage(incoming=True))
