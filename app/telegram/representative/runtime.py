@@ -23,7 +23,6 @@ class RepresentativeRuntime:
         from app.telegram.representative.panel import register as h
         from app.telegram.representative.navigation import register as n
         from app.telegram.representative.checkout import register as co
-        from app.telegram.representative.user import register as c
         from app.telegram.representative.user_services import register as us
         from app.telegram.representative.wallet import register as w
         from app.telegram.representative.profile import register as pr
@@ -31,7 +30,7 @@ class RepresentativeRuntime:
         from app.telegram.representative.trial import register as tr
         from app.telegram.representative.referral import register as rf
         from app.telegram.representative.support import register as sp
-        a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); co(self.client,self.tenant_id); n(self.client,self.tenant_id); c(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id); rf(self.client,self.tenant_id); sp(self.client,self.tenant_id)
+        a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); co(self.client,self.tenant_id); n(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id); rf(self.client,self.tenant_id); sp(self.client,self.tenant_id)
     async def _start(self,event):
         async with tenant_dispatch(self.tenant_id):
             if await self.dashboard.is_owner(event.sender_id):
