@@ -28,7 +28,7 @@ from app.telegram.admin.panels.service import build_panel_summary_block, display
 from app.telegram.admin.plans.callbacks import inline_callback as plan_inline_callback
 from app.telegram.keyboards.customization import create_keyboard_buttons_admin_buttons
 from app.telegram.shared.url_presets import format_admin_links_message, get_bot_username
-from app.telegram.state import set_step
+from app.telegram.state import clear_user, set_step
 
 MODULE_NAME = "admin.representative_panel"
 MODULE_ENABLED = True
@@ -37,6 +37,7 @@ MODULE_ORDER = 50
 REP_MENU = {
     "🗂 پنل نماینده",
     "🗞 مدیریت پلن‌ها",
+    "مدیریت پلن‌ها",  # compatibility with the existing reply keyboard label
     "📊 وضعیت پنل",
     "⚙️ تنظیمات فروش",
     "🎟 کدهای تخفیف",
@@ -63,6 +64,13 @@ async def _tenant_panel_code() -> int | None:
     return int(panel.code) if panel else None
 
 
+async def _reset_plan_flow(user_id: int) -> None:
+    """Never carry an unfinished create-plan state into the plan management menu."""
+    with __import__("contextlib").suppress(Exception):
+        await clear_user(user_id)
+    await set_step(user_id, "panel")
+
+
 async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
     panel = await _tenant_panel()
     if not panel:
@@ -76,6 +84,8 @@ async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
 
 
 async def _show_plan_menu(event):
+    # Entering this menu must cancel any stale add-plan wizard first.
+    await _reset_plan_flow(event.sender_id)
     await event.respond(
         "🗞 **مدیریت پلن‌ها**\n\nپلن‌ها فقط برای پنل نماینده فعلی مدیریت می‌شوند.\nثبت یا حذف پنل از این بخش مجاز نیست.",
         buttons=[
@@ -118,6 +128,8 @@ async def _rep_menu_handler(event: Message):
 
     if msg == "🗂 پنل نماینده":
         await display_panels(event.sender_id, current_page=1)
+    elif msg in {"🗞 مدیریت پلن‌ها", "مدیریت پلن‌ها"}:
+        await _show_plan_menu(event)
     elif msg == "📊 وضعیت پنل":
         panel = await _tenant_panel()
         if not panel:
@@ -132,8 +144,6 @@ async def _rep_menu_handler(event: Message):
                 [Button.inline("🔙 بازگشت", data="back_to_admin_panel")],
             ],
         )
-    elif msg == "🗞 مدیریت پلن‌ها":
-        await _show_plan_menu(event)
     elif msg == "⚙️ تنظیمات فروش":
         await _show_sales_menu(event)
     elif msg == "🎟 کدهای تخفیف":
