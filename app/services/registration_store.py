@@ -5,7 +5,7 @@ import string
 
 from sqlalchemy import select
 
-from app.db.models import RegistrationStatus, RepresentativeRegistration
+from app.db.models import RegistrationStatus, RegistrationStep, RepresentativeRegistration
 from app.db.session import SessionFactory
 
 
@@ -74,29 +74,27 @@ class RegistrationStore:
             )
             return result.scalar_one_or_none()
 
+    async def update(self, record_id: int, **values) -> RepresentativeRegistration:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            record = await session.get(RepresentativeRegistration, record_id)
+            if record is None:
+                raise LookupError("registration not found")
+            for key, value in values.items():
+                setattr(record, key, value)
+            await session.commit()
+            await session.refresh(record)
+            return record
+
+    async def set_step(self, record_id: int, step: RegistrationStep) -> None:
+        await self.update(record_id, step=step.value)
+
     async def mark_pending(self, record_id: int) -> None:
-        await self._set_status(record_id, RegistrationStatus.PENDING.value)
+        await self.update(record_id, status=RegistrationStatus.PENDING.value, step=RegistrationStep.COMPLETE.value)
 
     async def mark_active(self, record_id: int) -> None:
-        await self._set_status(record_id, RegistrationStatus.ACTIVE.value)
+        await self.update(record_id, status=RegistrationStatus.ACTIVE.value)
 
     async def mark_rejected(self, record_id: int, reason: str | None = None) -> None:
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
-        async with SessionFactory() as session:
-            record = await session.get(RepresentativeRegistration, record_id)
-            if record is None:
-                return
-            record.status = RegistrationStatus.REJECTED.value
-            record.rejection_reason = reason
-            await session.commit()
-
-    async def _set_status(self, record_id: int, status: str) -> None:
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
-        async with SessionFactory() as session:
-            record = await session.get(RepresentativeRegistration, record_id)
-            if record is None:
-                return
-            record.status = status
-            await session.commit()
+        await self.update(record_id, status=RegistrationStatus.REJECTED.value, rejection_reason=reason)
