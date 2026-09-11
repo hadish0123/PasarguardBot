@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass(slots=True)
@@ -21,8 +21,16 @@ class NewMessage:
 @dataclass(slots=True)
 class CallbackQuery:
     data: bytes | str | Any | None = None
+    func: Callable[[Any], bool] | None = None
 
     def matches(self, event: Any) -> bool:
+        if self.func is not None:
+            try:
+                if not bool(self.func(event)):
+                    return False
+            except Exception:
+                return False
+
         if self.data is None:
             return True
 
