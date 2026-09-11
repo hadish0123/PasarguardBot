@@ -35,7 +35,8 @@ async def representative_plan_message_entry(event):
 
     The legacy plans message registration is restricted to ADMIN_ID, while a
     representative runtime uses the tenant owner as its admin. Keep the
-    existing plan flow intact and only add the missing runtime routing layer.
+    existing plan flow intact and run this routing handler before other broad
+    representative message handlers so numeric wizard input cannot be missed.
     """
     if not event.is_private or not is_representative_runtime():
         return
@@ -52,12 +53,15 @@ async def representative_plan_message_entry(event):
 
 
 def register_representative_entry(client):
+    # Plan wizard input must run before the generic representative message
+    # handlers. Telethon-compatible custom dispatchers sort lower priorities
+    # first, so use a dedicated early priority without changing the flow.
+    handler = events.NewMessage(incoming=True)
+    handler._handler_priority = -100
+    client.add_event_handler(representative_plan_message_entry, handler)
+
     client.add_event_handler(
         representative_plan_menu_entry,
-        events.NewMessage(incoming=True),
-    )
-    client.add_event_handler(
-        representative_plan_message_entry,
         events.NewMessage(incoming=True),
     )
 
