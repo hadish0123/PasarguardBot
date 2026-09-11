@@ -2,7 +2,7 @@
 
 import re
 
-from telethon import Button
+from app.custom_telethon.button import Button
 from telethon.tl.types import (
     ButtonTypeSimpleWebView,
     InlineButtonTypeCallback,
@@ -162,13 +162,7 @@ def styled_simple_webview_button(text: str, url: str, style_obj=None):
 
 
 def styled_reply_button(text: str, style_obj=None):
-    """Build a normal reply button through the project's compatible Button API.
-
-    The installed Telethon KeyboardButton constructor does not accept ``type`` on
-    this runtime, while Telegram's Bot API only needs the text for a normal reply
-    keyboard button. Keep the style argument for callers, but do not pass it into
-    the incompatible TL constructor.
-    """
+    """Build a normal reply button with the project's Bot API button type."""
     return Button.text(text=text, resize=True)
 
 
