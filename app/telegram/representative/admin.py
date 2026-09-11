@@ -52,7 +52,7 @@ async def admin_callback(event) -> None:
     if not await _authorized(event):
         await event.answer("دسترسی مدیریت ندارید.", alert=True)
         return
-    if event.data.startswith(b"rep:plans:"):
+    if event.data.startswith(b"rep:plans:") or event.data.startswith(b"rep:users:"):
         return
     action = event.data[len(PREFIX):].decode(errors="ignore")
     if action == REP_HOME:
@@ -62,6 +62,12 @@ async def admin_callback(event) -> None:
     labels = {REP_PLANS: "🗂 مدیریت پلن‌ها", REP_USERS: "👥 کاربران", REP_ORDERS: "🛒 فروش و سفارش‌ها", REP_DISCOUNTS: "🎟 تخفیف‌ها", REP_SALES: "⚙️ تنظیمات فروش", REP_TEXTS: "📝 متن‌ها و دکمه‌ها", REP_LOGS: "📋 لاگ‌ها", REP_LINKS: "🔗 لینک‌ها", REP_SETTINGS: "⚙️ تنظیمات نماینده"}
     if action == REP_PLANS:
         from app.telegram.representative.plans import render
+        text, buttons = await render()
+        await event.edit(text, buttons=buttons)
+        await event.answer()
+        return
+    if action == REP_USERS:
+        from app.telegram.representative.users import render
         text, buttons = await render()
         await event.edit(text, buttons=buttons)
         await event.answer()
