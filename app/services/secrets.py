@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from cryptography.fernet import Fernet, InvalidToken
+import os
 
-from app.core.config import settings
+from cryptography.fernet import Fernet, InvalidToken
 
 
 class SecretBox:
@@ -24,4 +24,4 @@ class SecretBox:
             raise RuntimeError("Encrypted secret cannot be decrypted") from exc
 
 
-secret_box = SecretBox(settings.secret_key)
+secret_box = SecretBox(os.getenv("SECRET_KEY", ""))
