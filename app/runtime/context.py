@@ -35,6 +35,18 @@ def is_representative_runtime() -> bool:
     return _current_tenant.get() is not None
 
 
+def is_runtime_admin(user_id: int) -> bool:
+    """Central admins stay admins everywhere; a representative owns their own bot tenant."""
+    try:
+        from config import ADMIN_ID
+        if int(user_id) in ADMIN_ID:
+            return True
+    except Exception:
+        pass
+    tenant = _current_tenant.get()
+    return bool(tenant and int(user_id) == int(tenant.owner_user_id))
+
+
 @contextmanager
 def tenant_context(tenant: TenantRuntime) -> Iterator[TenantRuntime]:
     token = _current_tenant.set(tenant)
