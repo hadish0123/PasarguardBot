@@ -16,29 +16,36 @@ logger = logging.getLogger(__name__)
 
 
 async def run(stop_event: asyncio.Event | None = None) -> None:
+    print("[telegram-runtime] run() entered", flush=True)
     if not settings.central_bot_token:
         raise RuntimeError("BOT_TOKEN is required")
 
+    print("[telegram-runtime] initializing database", flush=True)
     await initialize_database()
+    print("[telegram-runtime] database initialized", flush=True)
 
-    # The local telethon compatibility facade is Bot API-only. API_ID/API_HASH
-    # are intentionally not required anywhere in the application runtime.
     client = TelegramClient("central")
+    print("[telegram-runtime] TelegramClient created", flush=True)
     register_central_handlers(client)
+    print("[telegram-runtime] central handlers registered", flush=True)
     register_central_admin_handlers(client)
+    print("[telegram-runtime] central admin handlers registered", flush=True)
+    print("[telegram-runtime] starting central bot", flush=True)
     await client.start(bot_token=settings.central_bot_token)
+    print("[telegram-runtime] central bot started", flush=True)
 
-    # Never start a representative runtime with the central bot token. A tenant
-    # accidentally registered with BOT_TOKEN would otherwise create a second
-    # getUpdates consumer and Telegram would terminate one of the connections.
     tenant_service = TenantService()
-    for tenant in await tenant_service.list_runtime_tenants(settings.central_bot_token):
+    tenants = await tenant_service.list_runtime_tenants(settings.central_bot_token)
+    print(f"[telegram-runtime] runtime tenants: {len(tenants)}", flush=True)
+    for tenant in tenants:
         try:
             await registry.start(tenant.id, tenant.bot_token)
-            logger.info("representative runtime restored: %s", tenant.id)
+            print(f"[telegram-runtime] representative runtime restored: {tenant.id}", flush=True)
         except Exception:
             logger.exception("failed to restore representative runtime: %s", tenant.id)
+            print(f"[telegram-runtime] representative restore failed: {tenant.id}", flush=True)
 
+    print("[telegram-runtime] entering update loop", flush=True)
     if stop_event is None:
         try:
             await client.run_until_disconnected()
