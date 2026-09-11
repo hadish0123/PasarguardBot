@@ -17,11 +17,16 @@ def register(client, tenant_id: str | None = None) -> None:
     async def text_handler(event):
         async with tenant_dispatch(tenant_id):
             await plan_text(event)
+
     async def callback_handler(event):
         async with tenant_dispatch(tenant_id):
             await plan_callback(event)
+
     client.add_event_handler(text_handler, events.NewMessage(incoming=True))
-    client.add_event_handler(callback_handler, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
+    client.add_event_handler(
+        callback_handler,
+        events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))),
+    )
 
 
 async def _owner(event) -> bool:
@@ -33,64 +38,121 @@ async def render() -> tuple[str, list]:
     if not plans:
         text = "🗂 **مدیریت پلن‌ها**\n\nهنوز پلنی ساخته نشده است."
     else:
-        lines = ["🗂 **مدیریت پلن‌ها**", ""]
+        blocks = ["🗂 **مدیریت پلن‌ها**", ""]
         for plan in plans:
             state = "🟢 فعال" if plan.enabled else "🔴 غیرفعال"
             provider = f"🔌 Template: `{plan.provider_template_id}`" if plan.provider_template_id else "⚠️ بدون Template پاسارگارد"
-            lines.append(f"#{plan.id} — **{plan.name}**\n💾 {plan.volume_gb:g} GB | ⏱ {plan.days} روز | 💰 {plan.price:g}\n{provider}\n{state}")
-        text = "\n\n".join(lines)
+            blocks.append(
+                f"#{plan.id} — **{plan.name}**\n"
+                f"💾 {plan.volume_gb:g} GB | ⏱ {plan.days} روز | 💰 {plan.price:g}\n"
+                f"{provider}\n{state}"
+            )
+        text = "\n\n".join(blocks)
     rows = [[Button.inline("➕ ساخت پلن", PREFIX + b"add")]]
     for plan in plans:
-        rows.append([Button.inline(f"{('🟢' if plan.enabled else '🔴')} {plan.name}", PREFIX + f"view:{plan.id}".encode()), Button.inline("🔄", PREFIX + f"toggle:{plan.id}".encode())])
+        rows.append([
+            Button.inline(f"{('🟢' if plan.enabled else '🔴')} {plan.name}", PREFIX + f"view:{plan.id}".encode()),
+            Button.inline("🔄", PREFIX + f"toggle:{plan.id}".encode()),
+        ])
     rows.append([Button.inline("🔙 داشبورد", b"rep:rep.home")])
     return text, rows
 
 
 async def show(event) -> None:
     if not await _owner(event):
-        await event.answer("دسترسی ندارید.", alert=True); return
+        await event.answer("دسترسی ندارید.", alert=True)
+        return
     text, buttons = await render()
-    await event.edit(text, buttons=buttons); await event.answer()
+    await event.edit(text, buttons=buttons)
+    await event.answer()
+
+
+async def _start_edit(event, plan_id: int) -> None:
+    plan = await SERVICE.get(plan_id)
+    if not plan:
+        await event.answer("پلن پیدا نشد.", alert=True)
+        return
+    _STATES[(get_tenant(), event.sender_id)] = {
+        "step": "edit_name", "plan_id": plan.id,
+        "name": plan.name, "volume": plan.volume_gb, "days": plan.days,
+        "price": plan.price, "template": plan.provider_template_id or 0,
+    }
+    await event.edit(
+        f"✏️ **ویرایش پلن #{plan.id}**\n\nنام جدید را ارسال کنید.\n\nمقدار فعلی: **{plan.name}**",
+        buttons=[[Button.inline("❌ لغو", PREFIX + f"view:{plan.id}".encode())]],
+    )
+    await event.answer()
 
 
 async def plan_callback(event) -> None:
     if not await _owner(event):
-        await event.answer("دسترسی ندارید.", alert=True); return
+        await event.answer("دسترسی ندارید.", alert=True)
+        return
     action = event.data[len(PREFIX):].decode(errors="ignore")
     if action in {"list", ""}:
-        await show(event); return
+        await show(event)
+        return
     if action == "add":
         _STATES[(get_tenant(), event.sender_id)] = {"step": "name"}
         await event.edit("➕ **ساخت پلن**\n\nنام پلن را ارسال کنید.", buttons=[[Button.inline("❌ لغو", PREFIX + b"cancel")]])
         await event.answer(); return
     if action == "cancel":
-        _STATES.pop((get_tenant(), event.sender_id), None); await show(event); return
+        _STATES.pop((get_tenant(), event.sender_id), None)
+        await show(event); return
     if action.startswith("view:"):
-        plan = await SERVICE.get(int(action.split(":", 1)[1]))
-        if not plan: await event.answer("پلن پیدا نشد.", alert=True); return
+        try: plan_id = int(action.split(":", 1)[1])
+        except ValueError: return await event.answer("شناسه نامعتبر است.", alert=True)
+        plan = await SERVICE.get(plan_id)
+        if not plan: return await event.answer("پلن پیدا نشد.", alert=True)
         state = "🟢 فعال" if plan.enabled else "🔴 غیرفعال"
         provider = f"🔌 Template پاسارگارد: `{plan.provider_template_id}`" if plan.provider_template_id else "⚠️ Template پاسارگارد تنظیم نشده"
-        await event.edit(f"📦 **{plan.name}**\n\n💾 حجم: `{plan.volume_gb:g} GB`\n⏱ مدت: `{plan.days}` روز\n💰 قیمت: `{plan.price:g}`\n{provider}\n📌 وضعیت: {state}", buttons=[[Button.inline("🔄 تغییر وضعیت", PREFIX + f"toggle:{plan.id}".encode())], [Button.inline("🗑 حذف", PREFIX + f"delete_prompt:{plan.id}".encode())], [Button.inline("🔙 لیست پلن‌ها", PREFIX + b"list")]])
+        await event.edit(
+            f"📦 **{plan.name}**\n\n💾 حجم: `{plan.volume_gb:g} GB`\n⏱ مدت: `{plan.days}` روز\n💰 قیمت: `{plan.price:g}`\n{provider}\n📌 وضعیت: {state}",
+            buttons=[
+                [Button.inline("✏️ ویرایش", PREFIX + f"edit:{plan.id}".encode())],
+                [Button.inline("🔄 تغییر وضعیت", PREFIX + f"toggle:{plan.id}".encode())],
+                [Button.inline("🗑 حذف", PREFIX + f"delete_prompt:{plan.id}".encode())],
+                [Button.inline("🔙 لیست پلن‌ها", PREFIX + b"list")],
+            ],
+        )
         await event.answer(); return
+    if action.startswith("edit:"):
+        await _start_edit(event, int(action.split(":", 1)[1])); return
     if action.startswith("toggle:"):
-        await SERVICE.toggle(int(action.split(":", 1)[1])); await show(event); return
+        try: await SERVICE.toggle(int(action.split(":", 1)[1])); await show(event)
+        except (LookupError, ValueError) as exc: await event.answer(str(exc), alert=True)
+        return
     if action.startswith("delete_prompt:"):
         plan = await SERVICE.get(int(action.split(":", 1)[1]))
-        if not plan: await event.answer("پلن پیدا نشد.", alert=True); return
-        await event.edit(f"⚠️ حذف پلن **{plan.name}** قطعی است. ادامه می‌دهید؟", buttons=[[Button.inline("✅ بله، حذف شود", PREFIX + f"delete:{plan.id}".encode())], [Button.inline("❌ انصراف", PREFIX + f"view:{plan.id}".encode())]])
-        await event.answer(); return
+        if not plan: return await event.answer("پلن پیدا نشد.", alert=True)
+        await event.edit(
+            f"⚠️ حذف پلن **{plan.name}** قطعی است.\n\nاگر سابقه سفارش یا سرویس داشته باشد، سیستم اجازه حذف نمی‌دهد.",
+            buttons=[
+                [Button.inline("✅ بله، حذف شود", PREFIX + f"delete:{plan.id}".encode())],
+                [Button.inline("❌ انصراف", PREFIX + f"view:{plan.id}".encode())],
+            ],
+        ); await event.answer(); return
     if action.startswith("delete:"):
-        await SERVICE.delete(int(action.split(":", 1)[1])); await show(event); return
+        try:
+            await SERVICE.delete(int(action.split(":", 1)[1]))
+        except (LookupError, ValueError) as exc:
+            return await event.answer(str(exc), alert=True)
+        await show(event); return
     await event.answer("گزینه نامعتبر است.", alert=True)
 
 
 async def plan_text(event) -> None:
-    if not await _owner(event) or not event.raw_text: return
-    key = (get_tenant(), event.sender_id); state = _STATES.get(key)
-    if not state: return
+    if not await _owner(event) or not event.raw_text:
+        return
+    key = (get_tenant(), event.sender_id)
+    state = _STATES.get(key)
+    if not state:
+        return
     text = event.raw_text.strip()
     if text in {"❌", "/cancel", "لغو"}:
-        _STATES.pop(key, None); await event.respond("❌ عملیات لغو شد."); return
+        _STATES.pop(key, None)
+        await event.respond("❌ عملیات لغو شد.")
+        return
     try:
         step = state["step"]
         if step == "name":
@@ -108,16 +170,45 @@ async def plan_text(event) -> None:
             value = float(text)
             if value < 0: raise ValueError("قیمت نمی‌تواند منفی باشد.")
             state.update(price=value, step="template")
-            await event.respond("🔌 شناسه Template پاسارگارد را وارد کنید.\n\nاگر فعلاً Template ندارید، `0` بفرستید؛ در این حالت فروش ثبت می‌شود ولی تحویل خودکار سرویس انجام نمی‌شود.")
-            return
+            await event.respond("🔌 شناسه Template پاسارگارد را وارد کنید. اگر ندارید `0` بفرستید."); return
         if step == "template":
             value = int(text)
             if value < 0: raise ValueError("شناسه Template نمی‌تواند منفی باشد.")
-            template_id = value or None
-            plan = await SERVICE.create(str(state["name"]), float(state["volume"]), int(state["days"]), float(state["price"]), template_id)
+            state["template"] = value or None
+            if state.get("plan_id"):
+                plan = await SERVICE.update(
+                    int(state["plan_id"]), name=str(state["name"]), volume_gb=float(state["volume"]),
+                    days=int(state["days"]), price=float(state["price"]), provider_template_id=state["template"],
+                )
+                _STATES.pop(key, None)
+                await event.respond(f"✅ پلن **{plan.name}** بروزرسانی شد.")
+            else:
+                plan = await SERVICE.create(str(state["name"]), float(state["volume"]), int(state["days"]), float(state["price"]), state["template"])
+                _STATES.pop(key, None)
+                await event.respond(f"✅ پلن **{plan.name}** ساخته شد.")
+            return
+        if step == "edit_name":
+            if not 2 <= len(text) <= 120: raise ValueError("نام باید بین 2 تا 120 کاراکتر باشد.")
+            state.update(name=text, step="edit_volume"); await event.respond(f"💾 حجم جدید را به GB وارد کنید. مقدار فعلی: `{state['volume']}`"); return
+        if step == "edit_volume":
+            value = float(text)
+            if value <= 0: raise ValueError("حجم باید بیشتر از صفر باشد.")
+            state.update(volume=value, step="edit_days"); await event.respond(f"⏱ مدت جدید را به روز وارد کنید. مقدار فعلی: `{state['days']}`"); return
+        if step == "edit_days":
+            value = int(text)
+            if value <= 0: raise ValueError("مدت باید بیشتر از صفر باشد.")
+            state.update(days=value, step="edit_price"); await event.respond(f"💰 قیمت جدید را وارد کنید. مقدار فعلی: `{state['price']}`"); return
+        if step == "edit_price":
+            value = float(text)
+            if value < 0: raise ValueError("قیمت نمی‌تواند منفی باشد.")
+            state.update(price=value, step="edit_template"); await event.respond(f"🔌 شناسه Template جدید را وارد کنید. مقدار فعلی: `{state['template'] or 0}`"); return
+        if step == "edit_template":
+            value = int(text)
+            if value < 0: raise ValueError("شناسه Template نمی‌تواند منفی باشد.")
+            state["template"] = value or None
+            plan = await SERVICE.update(int(state["plan_id"]), name=str(state["name"]), volume_gb=float(state["volume"]), days=int(state["days"]), price=float(state["price"]), provider_template_id=state["template"])
             _STATES.pop(key, None)
-            provider = f"Template `{plan.provider_template_id}`" if plan.provider_template_id else "بدون Template"
-            await event.respond(f"✅ پلن **{plan.name}** ساخته شد.\n🔌 {provider}")
+            await event.respond(f"✅ پلن **{plan.name}** با موفقیت ویرایش شد.")
             return
     except (ValueError, TypeError) as exc:
         await event.respond(f"❌ ورودی نامعتبر: {exc}\n\nدوباره تلاش کنید یا `لغو` بفرستید.")
