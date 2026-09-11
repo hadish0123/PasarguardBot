@@ -3,6 +3,7 @@ from __future__ import annotations
 from telethon import Button, events
 
 from app.core.ids import REP_HOME, REP_DISCOUNTS, REP_LINKS, REP_LOGS, REP_ORDERS, REP_PLANS, REP_SALES, REP_SETTINGS, REP_TEXTS, REP_USERS
+from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_dashboard import RepresentativeDashboardService
 from app.runtime.context import get_tenant
 
@@ -21,9 +22,12 @@ ADMIN_MENU = [
 ]
 
 
-def register(client) -> None:
+def register(client, tenant_id: str | None = None) -> None:
+    async def callback(event):
+        async with tenant_dispatch(tenant_id):
+            await admin_callback(event)
     client.add_event_handler(show_admin, events.NewMessage(pattern=r"^/admin$"))
-    client.add_event_handler(admin_callback, events.CallbackQuery(data=PREFIX))
+    client.add_event_handler(callback, events.CallbackQuery(data=PREFIX))
 
 
 async def _authorized(event) -> bool:
@@ -55,17 +59,7 @@ async def admin_callback(event) -> None:
         await event.edit(await dashboard_text(), buttons=ADMIN_MENU)
         await event.answer()
         return
-    labels = {
-        REP_PLANS: "🗂 مدیریت پلن‌ها",
-        REP_USERS: "👥 کاربران",
-        REP_ORDERS: "🛒 فروش و سفارش‌ها",
-        REP_DISCOUNTS: "🎟 تخفیف‌ها",
-        REP_SALES: "⚙️ تنظیمات فروش",
-        REP_TEXTS: "📝 متن‌ها و دکمه‌ها",
-        REP_LOGS: "📋 لاگ‌ها",
-        REP_LINKS: "🔗 لینک‌ها",
-        REP_SETTINGS: "⚙️ تنظیمات نماینده",
-    }
+    labels = {REP_PLANS: "🗂 مدیریت پلن‌ها", REP_USERS: "👥 کاربران", REP_ORDERS: "🛒 فروش و سفارش‌ها", REP_DISCOUNTS: "🎟 تخفیف‌ها", REP_SALES: "⚙️ تنظیمات فروش", REP_TEXTS: "📝 متن‌ها و دکمه‌ها", REP_LOGS: "📋 لاگ‌ها", REP_LINKS: "🔗 لینک‌ها", REP_SETTINGS: "⚙️ تنظیمات نماینده"}
     if action == REP_PLANS:
         from app.telegram.representative.plans import render
         text, buttons = await render()
