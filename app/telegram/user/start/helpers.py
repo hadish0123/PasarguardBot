@@ -9,20 +9,10 @@ from app import Kenzo
 from app.db.crud.user import UserCRUD, add_user, get_user_status
 from app.db.redis import get_redis
 from app.logger import get_logger
-from app.services.billing.sticky_discount import (
-    apply_sticky_discount,
-    format_sticky_applied_message,
-    get_sticky_discount,
-    parse_discount_start_param,
-)
+from app.runtime.context import get_current_tenant
+from app.services.billing.sticky_discount import apply_sticky_discount, format_sticky_applied_message, get_sticky_discount, parse_discount_start_param
 from app.telegram.keyboards.home import bhome_buttons
-from app.telegram.shared.guards.channel_gate import (
-    CHANNEL_JOIN_MESSAGE,
-    build_channel_join_buttons,
-    extract_start_param,
-    get_not_joined_channels,
-    is_reserved_start_param,
-)
+from app.telegram.shared.guards.channel_gate import CHANNEL_JOIN_MESSAGE, build_channel_join_buttons, extract_start_param, get_not_joined_channels, is_reserved_start_param
 from app.telegram.shared.start_params import find_app_key_by_start_param, is_welcome_start_param
 from app.telegram.state.keys import get_redis_namespace
 from app.utils.formatting.dates import Time_Date
@@ -32,8 +22,6 @@ logger = get_logger(__name__)
 
 BOT_LANGUAGE = "fa"
 _START_REACTION_KEY = "feature:start_reaction"
-
-
 DEFAULT_START_MESSAGE = (
     "**🎈تبریک! به قندشکن خوش آمدید!**\n"
     "**🛍 خرید سرویس پرسرعت و تحویل آنی**\n"
@@ -50,7 +38,15 @@ async def get_user_lang(user_id: int) -> str:
 
 
 async def fetch_welcome_text() -> str:
-    return await get_bot_text(key="start_message", default=DEFAULT_START_MESSAGE, lang="fa")
+    text = await get_bot_text(key="start_message", default=DEFAULT_START_MESSAGE, lang="fa")
+    tenant = get_current_tenant()
+    if tenant and tenant.brand:
+        brand = tenant.brand.strip()
+        # Keep the representative's own brand visible even when the tenant
+        # inherited the generic central start_message.
+        if brand and brand.lower() not in text.lower():
+            return f"🏷️ **{brand}**\n\n{text}"
+    return text
 
 
 def _start_reaction_redis_key() -> str:
@@ -84,7 +80,6 @@ async def toggle_start_reaction() -> bool:
 
 
 def resolve_app_download_param(param: str | None) -> str | None:
-    """Return app key when param triggers a download; welcome/legacy params are ignored."""
     if is_welcome_start_param(param):
         return None
     return find_app_key_by_start_param(param)
@@ -94,34 +89,19 @@ async def send_welcome_menu(event: Message, welcome_text: str, lang: str) -> Non
     reaction_on = await is_start_reaction_enabled()
     if reaction_on:
         try:
-            await Kenzo(
-                functions.messages.SendReactionRequest(
-                    peer=event.chat_id,
-                    msg_id=event.id,
-                    big=True,
-                    reaction=[types.ReactionEmoji(emoticon="🔥")],
-                    add_to_recent=False,
-                )
-            )
+            await Kenzo(functions.messages.SendReactionRequest(peer=event.chat_id, msg_id=event.id, big=True, reaction=[types.ReactionEmoji(emoticon="🔥")], add_to_recent=False))
         except Exception as exc:
             logger.debug("Could not send reaction to message %s: %s", event.id, exc)
-
-    send_kwargs = {
-        "entity": event.sender_id,
-        "message": welcome_text,
-        "buttons": await bhome_buttons(event.sender_id, lang),
-    }
+    send_kwargs = {"entity": event.sender_id, "message": welcome_text, "buttons": await bhome_buttons(event.sender_id, lang)}
     if reaction_on:
-        send_kwargs["message_effect_id"] = 5046509860389126442  # 🎉
+        send_kwargs["message_effect_id"] = 5046509860389126442
     await Kenzo.send_message(**send_kwargs)
 
 
 async def handle_discount_start_param(user_id: int, param: str | None, *, notify: bool = True) -> bool:
-    """Apply ``discount_CODE`` from /start and notify the user."""
     code = parse_discount_start_param(param)
     if not code:
         return False
-
     ok, result = await apply_sticky_discount(user_id, code)
     if notify:
         if ok and result in ("applied", "already_applied"):
@@ -133,12 +113,7 @@ async def handle_discount_start_param(user_id: int, param: str | None, *, notify
                 await Kenzo.send_message(entity=user_id, message=message, parse_mode="md")
         elif not ok:
             await Kenzo.send_message(entity=user_id, message=f"❌ {result}")
-
-    if ok:
-        logger.info("Sticky discount %s applied for user %s via start=%s", code, user_id, param)
-    else:
-        logger.info("Sticky discount %s rejected for user %s: %s", code, user_id, result)
-
+    logger.info("Sticky discount %s %s for user %s via start=%s", code, "applied" if ok else "rejected", user_id, param)
     return True
 
 
@@ -146,18 +121,8 @@ async def prompt_channel_join(event: Message, lang: str) -> None:
     not_joined_channels = await get_not_joined_channels(event.sender_id)
     if not not_joined_channels:
         return
-
-    await add_user(
-        user_id=event.sender_id,
-        step="start",
-        time_s=Time_Date()["stamp"],
-        language=lang,
-    )
-    await event.reply(
-        CHANNEL_JOIN_MESSAGE.format(date=Time_Date()["mf"]),
-        buttons=build_channel_join_buttons(not_joined_channels),
-        parse_mode="html",
-    )
+    await add_user(user_id=event.sender_id, step="start", time_s=Time_Date()["stamp"], language=lang)
+    await event.reply(CHANNEL_JOIN_MESSAGE.format(date=Time_Date()["mf"]), buttons=build_channel_join_buttons(not_joined_channels), parse_mode="html")
 
 
 async def start_command_filter(event: Message) -> bool:
@@ -165,10 +130,8 @@ async def start_command_filter(event: Message) -> bool:
         return False
     if await get_user_status(event.sender_id) == "ban":
         return False
-
     msg = event.message.text or event.message.message or ""
     if not msg.lower().startswith("/start") and extract_start_param(event) is None:
         return False
-
     param = extract_start_param(event)
     return not is_reserved_start_param(param)
