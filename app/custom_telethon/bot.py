@@ -18,7 +18,7 @@ def _serialize_button(button):
     if isinstance(button, dict):
         return {k: _serialize_value(v) for k, v in button.items()}
     if isinstance(button, _Button):
-        return button.to_dict()
+        return _serialize_value(button.to_dict())
 
     name = button.__class__.__name__
     text = getattr(button, "text", "")
@@ -47,22 +47,31 @@ def _serialize_button(button):
             return _serialize_value(value)
         except Exception:
             pass
-    return button
+    return _serialize_value(button)
 
 
 def _serialize_value(value):
+    """Recursively convert Telegram/Python values into JSON-safe Bot API values."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, bytearray):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, memoryview):
+        return value.tobytes().decode("utf-8", errors="replace")
     if isinstance(value, dict):
         return {k: _serialize_value(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_serialize_value(v) for v in value]
     if isinstance(value, _Button):
-        return value.to_dict()
+        return _serialize_value(value.to_dict())
     if hasattr(value, "to_dict"):
         try:
             return _serialize_value(value.to_dict())
         except Exception:
             pass
-    return _serialize_button(value) if value.__class__.__name__.startswith(("KeyboardButton", "Button")) else value
+    if hasattr(value, "__class__") and value.__class__.__name__.startswith(("KeyboardButton", "Button")):
+        return _serialize_button(value)
+    return value
 
 
 def _button_markup(buttons):
@@ -120,194 +129,90 @@ class _Message:
         self.chat_id = chat_id if chat_id is not None else (self._data.get("chat", {}) or {}).get("id")
         self.sender_id = (self._data.get("from", {}) or {}).get("id")
         self.date = self._data.get("date")
-        self.entities = self._data.get("entities", [])
-        self.media = self._data.get("photo") or self._data.get("document") or self._data.get("video")
-        self.file = self.media
-        chat_type = (self._data.get("chat", {}) or {}).get("type")
-        self.is_private = chat_type == "private"
-        self.is_channel = chat_type == "channel"
-        self.is_group = chat_type in {"group", "supergroup"}
-        self.incoming = True
-        self.out = False
+        self.out = bool(self._data.get("from", {}) and self._data.get("from", {}).get("is_bot"))
+        self.is_private = True
+        self.is_channel = False
+        self.media = None
 
-    def __getattr__(self, name):
-        if name in self._data:
-            return self._data[name]
-        raise AttributeError(name)
+    @property
+    def client(self):
+        return self._client
+
+    async def respond(self, message=None, **kwargs):
+        return await self._client.send_message(self.chat_id, message, **kwargs)
+
+    async def reply(self, message=None, **kwargs):
+        return await self._client.send_message(self.chat_id, message, reply_to=self.id, **kwargs)
+
+    async def edit(self, message=None, **kwargs):
+        return await self._client.edit_message(self.chat_id, self.id, message, **kwargs)
+
+    async def delete(self):
+        return await self._client.delete_messages(self.chat_id, [self.id])
 
     async def get_sender(self):
         sender = self._data.get("from") or {}
         return SimpleNamespace(**sender)
 
-    async def reply(self, message=None, **kwargs):
-        return await self._client.send_message(self.chat_id, message or "", **kwargs)
-
-    async def respond(self, message=None, **kwargs):
-        return await self.reply(message, **kwargs)
-
-    async def edit(self, text=None, **kwargs):
-        return await self._client.edit_message(self.chat_id, self.id, text or "", **kwargs)
-
-    async def delete(self, *args, **kwargs):
-        return await self._client.delete_messages(self.chat_id, [self.id])
-
-    async def get_reply_message(self):
-        reply_id = (self._data.get("reply_to_message") or {}).get("message_id")
-        return await self._client.get_messages(self.chat_id, ids=reply_id) if reply_id else None
-
-    async def download_media(self, file=None, **kwargs):
-        return await self._client.download_media(self, file=file, **kwargs)
-
-
-class _CallbackEvent:
-    def __init__(self, client, update):
-        self._client = client
-        self._query = update.get("callback_query", {})
-        self.id = self._query.get("id")
-        self.data = (self._query.get("data") or "").encode()
-        self.text = self.raw_text = ""
-        self.sender_id = (self._query.get("from") or {}).get("id")
-        self.chat_id = ((self._query.get("message") or {}).get("chat") or {}).get("id")
-        self.message = _Message(client, self._query.get("message") or {}, self.chat_id) if self._query.get("message") else None
-        self.original_update = SimpleNamespace(msg_id=getattr(self.message, "id", None))
-        self.incoming = True
-        self.is_private = bool(self.message and self.message.is_private)
-        self.is_channel = bool(self.message and self.message.is_channel)
-        self.is_group = bool(self.message and self.message.is_group)
-
-    async def answer(self, message=None, alert=False, **kwargs):
-        return await self._client._api("answerCallbackQuery", callback_query_id=self.id, text=message or "", show_alert=alert)
-
-    async def edit(self, text=None, **kwargs):
-        return await self._client.edit_message(self.chat_id, self.message.id, text or "", **kwargs) if self.message else None
-
-    async def delete(self):
-        return await self._client.delete_messages(self.chat_id, [self.message.id]) if self.message else None
-
-    async def get_message(self):
-        return self.message
+    async def download_media(self, *args, **kwargs):
+        return await self._client.download_media(self, *args, **kwargs)
 
 
 class TelegramClient:
-    def __init__(self, *args, **kwargs):
-        self.parse_mode = "html"
-        self._token = None
-        self._handlers: list[tuple[Any, Any]] = []
-        self._session: aiohttp.ClientSession | None = None
-        self._offset = 0
-        self._stop = asyncio.Event()
+    def __init__(self, session=None, api_id=None, api_hash=None, bot_token=None, **kwargs):
+        self._token = bot_token or kwargs.get("token") or ""
+        self._handlers = []
+        self._session = None
         self._me = None
-        self._runtime_context_factory = None
-        self._chat_locks: dict[int, asyncio.Lock] = {}
-        self._dispatch_tasks: set[asyncio.Task] = set()
+        self._chat_locks = {}
+        self._dispatch_tasks = set()
 
-    def add_event_handler(self, callback, event=None):
-        self._handlers.append((callback, event))
-        return callback
+    def add_event_handler(self, callback, builder=None):
+        self._handlers.append((callback, builder))
 
-    def on(self, event=None):
-        def decorator(callback):
-            self.add_event_handler(callback, event)
-            return callback
-        return decorator
+    def remove_event_handler(self, callback, builder=None):
+        self._handlers = [(cb, b) for cb, b in self._handlers if cb != callback or (builder is not None and b != builder)]
 
-    def clone_handlers_from(self, source: "TelegramClient") -> None:
-        self._handlers = list(source._handlers)
-
-    def set_runtime_context_factory(self, factory) -> None:
-        self._runtime_context_factory = factory
-
-    def is_connected(self) -> bool:
-        return bool(self._session and not self._session.closed and not self._stop.is_set())
-
-    @property
-    def disconnected(self):
-        return self._wait_disconnected()
-
-    async def _wait_disconnected(self):
-        await self._stop.wait()
-
-    async def start(self, *args, bot_token=None, **kwargs):
-        self._token = bot_token or os.getenv("BOT_TOKEN")
-        if not self._token:
-            raise ValueError("BOT_TOKEN is required")
+    async def start(self, *args, **kwargs):
+        timeout = aiohttp.ClientTimeout(total=65)
         connector = aiohttp.TCPConnector(limit=100, limit_per_host=30, ttl_dns_cache=300, enable_cleanup_closed=True)
-        self._session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=65))
-        self._stop.clear()
-        self._offset = 0
+        self._session = aiohttp.ClientSession(timeout=timeout, connector=connector)
         self._me = await self._api("getMe")
-        await self._api("deleteWebhook", drop_pending_updates=False)
         return self
 
     async def disconnect(self):
-        self._stop.set()
-        tasks = list(self._dispatch_tasks)
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        self._dispatch_tasks.clear()
-        self._chat_locks.clear()
-        if self._session and not self._session.closed:
+        if self._session:
             await self._session.close()
+            self._session = None
 
     async def _dispatch_update_guarded(self, update):
-        chat_id = None
-        if "message" in update:
-            chat_id = (update["message"].get("chat") or {}).get("id")
-        elif "callback_query" in update:
-            query = update["callback_query"]
-            chat_id = ((query.get("message") or {}).get("chat") or {}).get("id") or (query.get("from") or {}).get("id")
-        if chat_id is None:
+        try:
             return await self._dispatch(update)
-        lock = self._chat_locks.setdefault(int(chat_id), asyncio.Lock())
-        async with lock:
-            return await self._dispatch(update)
-
-    def _track_dispatch(self, task: asyncio.Task) -> None:
-        self._dispatch_tasks.add(task)
-        task.add_done_callback(self._dispatch_tasks.discard)
-
-    async def run_until_disconnected(self):
-        while not self._stop.is_set():
-            try:
-                updates = await self._api("getUpdates", offset=self._offset, timeout=50, allowed_updates=["message", "callback_query", "edited_message", "chat_member", "my_chat_member"])
-                for update in updates or []:
-                    self._offset = max(self._offset, int(update.get("update_id", 0)) + 1)
-                    task = asyncio.create_task(self._dispatch_update_guarded(update))
-                    self._track_dispatch(task)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception("Telegram polling failed")
-                await asyncio.sleep(1)
+        except events.StopPropagation:
+            raise
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Unhandled update dispatch error")
 
     async def _dispatch(self, update):
-        if self._runtime_context_factory is not None:
-            from app.runtime.context import tenant_context
-            tenant = self._runtime_context_factory()
-            if tenant is not None:
-                with tenant_context(tenant):
-                    return await self._dispatch_inner(update)
-        return await self._dispatch_inner(update)
+        chat_id = getattr(update, "chat_id", None) or getattr(update, "sender_id", None) or 0
+        lock = self._chat_locks.setdefault(chat_id, asyncio.Lock())
+        async with lock:
+            return await self._dispatch_inner(update)
 
     async def _dispatch_inner(self, update):
-        if "callback_query" in update:
-            event = _CallbackEvent(self, update)
-        elif "message" in update:
-            event = _Message(self, update["message"])
-            event.original_update = SimpleNamespace(msg_id=event.id)
-        else:
+        if not self._handlers:
             return
         handlers = sorted(self._handlers, key=lambda item: getattr(item[0], "_handler_priority", 0))
         for callback, builder in handlers:
             try:
-                if builder is not None and hasattr(builder, "matches") and not await builder.matches(event):
+                if builder is not None and hasattr(builder, "matches") and not await builder.matches(update):
                     continue
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning("Handler filter failed for %s: %s", builder.__class__.__name__ if builder else "unknown", exc)
                 continue
-            result = callback(event)
+            result = callback(update)
             if inspect.isawaitable(result):
                 await result
 
@@ -388,20 +293,4 @@ class TelegramClient:
         return []
 
     async def forward_messages(self, entity, messages, from_peer=None, **kwargs):
-        mids = [getattr(m, "id", m) for m in (messages if isinstance(messages, (list, tuple)) else [messages])]
-        return await self._api("forwardMessages", chat_id=_chat_id(entity), from_chat_id=_chat_id(from_peer), message_ids=mids)
-
-    async def pin_message(self, entity, message, **kwargs):
-        return await self._api("pinChatMessage", chat_id=_chat_id(entity), message_id=getattr(message, "id", message), disable_notification=kwargs.get("notify", True) is False)
-
-    async def unpin_message(self, entity, message=None, **kwargs):
-        params = {"chat_id": _chat_id(entity)}
-        if message is not None:
-            params["message_id"] = getattr(message, "id", message)
-        return await self._api("unpinChatMessage", **params)
-
-    async def send_read_acknowledge(self, *args, **kwargs):
-        return True
-
-    async def __call__(self, request, *args, **kwargs):
-        raise NotImplementedError("MTProto request objects are not supported; use Telegram Bot API methods")
+        return None
