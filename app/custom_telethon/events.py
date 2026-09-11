@@ -27,6 +27,16 @@ class _Builder:
             return {getattr(v, "id", v) for v in value}
         return {getattr(value, "id", value)}
 
+    @staticmethod
+    def _match_regex(pattern, text: str) -> bool:
+        if hasattr(pattern, "match"):
+            raw_pattern = getattr(pattern, "pattern", None)
+            target = text.encode() if isinstance(raw_pattern, bytes) else text
+            return pattern.match(target) is not None
+        if isinstance(pattern, bytes):
+            return re.match(pattern, text.encode()) is not None
+        return re.match(pattern, text) is not None
+
     async def matches(self, event):
         if self.incoming is not None and getattr(event, "incoming", True) != self.incoming:
             return False
@@ -44,41 +54,27 @@ class _Builder:
             return False
         if self.pattern is not None:
             text = getattr(event, "raw_text", None) or getattr(event, "text", "") or ""
-            # Ensure text is a string, not an object
             if not isinstance(text, str):
                 text = str(text) if text else ""
-            if re.match(self.pattern, text) is None:
+            if not self._match_regex(self.pattern, text):
                 return False
         if self.data is not None:
             actual = getattr(event, "data", b"")
             expected = self.data
-            if isinstance(expected, bytes):
-                # Expected is bytes (or has .match for bytes regex)
+            if hasattr(expected, "match"):
+                raw_pattern = getattr(expected, "pattern", None)
+                target = actual if isinstance(raw_pattern, bytes) else (actual.decode(errors="ignore") if isinstance(actual, bytes) else actual)
+                if expected.match(target) is None:
+                    return False
+            elif isinstance(expected, bytes):
                 if isinstance(actual, str):
                     actual = actual.encode()
-                if hasattr(expected, "match"):
-                    # Bytes regex object
-                    if expected.match(actual) is None:
-                        return False
-                elif actual != expected:
+                if actual != expected:
                     return False
             else:
-                # Expected is not bytes (could be string or regex object)
                 if isinstance(actual, bytes):
                     actual = actual.decode(errors="ignore")
-                if hasattr(expected, "match"):
-                    # Regex object - ensure it can match against string
-                    # If regex was compiled from bytes, convert it to work with string
-                    try:
-                        if expected.match(actual) is None:
-                            return False
-                    except TypeError:
-                        # Regex was compiled from bytes (rb"...") but actual is string
-                        # Try matching bytes version
-                        actual_bytes = actual.encode()
-                        if expected.match(actual_bytes) is None:
-                            return False
-                elif actual != expected:
+                if actual != expected:
                     return False
         if self.func is not None:
             result = self.func(event)
