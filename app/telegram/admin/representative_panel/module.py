@@ -28,6 +28,7 @@ from app.telegram.admin.manage_user.callbacks import callback_manage_user_admin
 from app.telegram.admin.manage_user.messages import msg_manage_user_admin
 from app.telegram.admin.panels.callbacks import panel_admin_callback_handler
 from app.telegram.admin.panels.service import build_panel_summary_block, display_panels
+from app.telegram.admin.plans import messages as plan_messages
 from app.telegram.admin.plans.callbacks import inline_callback as plan_inline_callback
 from app.telegram.keyboards.customization import create_keyboard_buttons_admin_buttons
 from app.telegram.shared.url_presets import format_admin_links_message, get_bot_username
@@ -50,17 +51,17 @@ REP_MENU = {
     "🔗 لینک های آماده",
 }
 
+_PLAN_STEPS = {"addPlan_1", "addPlan_2", "addPlan_3", "addPlan_4"}
+
 
 def _rep_admin(event) -> bool:
     return bool(is_representative_runtime() and is_runtime_admin(event.sender_id) and event.is_private)
 
 
 def _normalize_menu_text(value: str | None) -> str:
-    """Normalize Telegram Persian text so reply-keyboard labels cannot miss by Unicode noise."""
     text = (value or "").replace("\u200c", " ").replace("\u200f", "").replace("\u200e", "")
     text = text.replace("ي", "ی").replace("ى", "ی").replace("ك", "ک")
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _is_plan_management_label(text: str) -> bool:
@@ -69,7 +70,6 @@ def _is_plan_management_label(text: str) -> bool:
 
 
 async def _reset_plan_flow(user_id: int) -> None:
-    """Never carry an unfinished create-plan state into an admin menu."""
     with contextlib.suppress(Exception):
         await clear_user(user_id)
     await set_step(user_id, "panel")
@@ -100,8 +100,6 @@ async def _show_rep_plan_panel_selector(event, *, manage: bool) -> None:
 
 
 async def _show_plan_menu(event):
-    # This is deliberately a hard reset: the reply-keyboard menu must always
-    # take precedence over a stale add-plan wizard left in Redis/in-memory state.
     await _reset_plan_flow(event.sender_id)
     await event.respond(
         "🗞 **مدیریت پلن‌ها**\n\nپلن‌ها فقط برای پنل نماینده فعلی مدیریت می‌شوند.\nثبت یا حذف پنل از این بخش مجاز نیست.",
@@ -136,6 +134,20 @@ async def _show_sales_menu(event):
     )
 
 
+async def _rep_plan_wizard_handler(event: Message):
+    """Own plan-wizard text input inside the representative runtime only."""
+    if not _rep_admin(event):
+        return
+    try:
+        step = await plan_messages.get_step(event.sender_id)
+    except Exception:
+        return
+    if step not in _PLAN_STEPS:
+        return
+    await plan_messages.message_handler_plans(event)
+    raise events.StopPropagation
+
+
 async def _rep_menu_handler(event: Message):
     if not _rep_admin(event):
         return
@@ -143,9 +155,6 @@ async def _rep_menu_handler(event: Message):
     if not msg:
         return
 
-    # Handle the plan-management label before any other stateful plan handler.
-    # This prevents a previous addPlan_1/addPlan_2/... state from consuming a
-    # reply-keyboard click as plan input.
     if _is_plan_management_label(msg):
         await _show_plan_menu(event)
         return
@@ -235,7 +244,6 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
         if tenant_code is None or panel_code != tenant_code:
             await event.answer("⛔️ فقط پنل متصل به همین نماینده قابل مدیریت است.", alert=True)
             raise events.StopPropagation
-        # Clear any stale wizard state before entering either branch.
         await _reset_plan_flow(event.sender_id)
         await plan_inline_callback(event)
         raise events.StopPropagation
@@ -292,6 +300,9 @@ async def _rep_callback_handler(event: events.CallbackQuery.Event):
 
 
 def register(client):
+    # Plan wizard input is registered here, so the central bot never owns
+    # plan-management text handlers.
+    client.add_event_handler(_rep_plan_wizard_handler, events.NewMessage(incoming=True, func=_rep_admin))
     client.add_event_handler(_rep_menu_handler, events.NewMessage(incoming=True, func=_rep_admin))
     client.add_event_handler(_rep_callback_handler, events.CallbackQuery(func=_rep_admin))
     client.add_event_handler(msg_manage_user_admin, events.NewMessage(incoming=True, func=_rep_admin))
