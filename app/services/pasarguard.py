@@ -17,6 +17,12 @@ class PasarguardClient:
                     f"{self.base_url}/api/system/info",
                     headers={"Authorization": f"Bearer {self.api_key}"},
                 )
-            return response.is_success
+            if response.status_code in (401, 403):
+                raise PermissionError("احراز هویت پنل ناموفق است؛ کلید API را بررسی کنید.")
+            if not response.is_success:
+                raise ExternalServiceError(f"پنل پاسارگارد پاسخ HTTP {response.status_code} برگرداند.")
+            return True
+        except PermissionError:
+            raise
         except httpx.HTTPError as exc:
             raise ExternalServiceError("ارتباط با پنل پاسارگارد برقرار نشد.") from exc
