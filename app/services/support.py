@@ -1,99 +1,57 @@
 from __future__ import annotations
-
-from sqlalchemy import func, select
-from app.db.models import SupportMessage, SupportTicket
+from sqlalchemy import text
 from app.db.session import SessionFactory
 from app.runtime.context import require_tenant
 
+STATUS = {"open", "in_progress", "resolved", "closed"}
 
 class SupportService:
-    async def create_ticket(self, user_id: int, subject: str, message: str) -> SupportTicket:
-        tenant_id = require_tenant()
-        subject = subject.strip()[:160]
-        message = message.strip()[:4000]
-        if not subject:
-            raise ValueError("موضوع تیکت الزامی است.")
-        if not message:
-            raise ValueError("متن پیام الزامی است.")
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+    async def create_ticket(self, user_id: int, subject: str, message: str):
+        tenant = require_tenant(); subject = subject.strip()[:160]; message = message.strip()[:4000]
+        if not subject: raise ValueError("موضوع تیکت الزامی است.")
+        if not message: raise ValueError("متن پیام الزامی است.")
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            ticket = SupportTicket(tenant_id=tenant_id, telegram_user_id=user_id, subject=subject, status="open")
-            session.add(ticket)
-            await session.flush()
-            session.add(SupportMessage(ticket_id=ticket.id, tenant_id=tenant_id, sender_id=user_id, sender_role="user", body=message))
-            await session.commit()
-            await session.refresh(ticket)
-            return ticket
-
-    async def list_user(self, user_id: int, limit: int = 20) -> list[SupportTicket]:
-        tenant_id = require_tenant()
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+            ticket = (await session.execute(text("INSERT INTO representative_support_tickets (tenant_id,telegram_user_id,subject,status) VALUES (:t,:u,:s,'open') RETURNING *"), {"t":tenant,"u":user_id,"s":subject})).mappings().one()
+            await session.execute(text("INSERT INTO representative_support_messages (ticket_id,tenant_id,sender_id,sender_role,body) VALUES (:id,:t,:u,'user',:b)"), {"id":ticket["id"],"t":tenant,"u":user_id,"b":message})
+            await session.commit(); return ticket
+    async def list_user(self, user_id: int, limit: int = 20):
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            return list((await session.execute(select(SupportTicket).where(SupportTicket.tenant_id == tenant_id, SupportTicket.telegram_user_id == user_id).order_by(SupportTicket.id.desc()).limit(min(max(limit, 1), 50)))).scalars().all())
-
-    async def list_admin(self, status: str | None = None, limit: int = 20, offset: int = 0) -> tuple[list[SupportTicket], bool]:
-        tenant_id = require_tenant()
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+            return list((await session.execute(text("SELECT * FROM representative_support_tickets WHERE tenant_id=:t AND telegram_user_id=:u ORDER BY id DESC LIMIT :n"), {"t":require_tenant(),"u":user_id,"n":min(max(limit,1),50)})).mappings().all())
+    async def list_admin(self, status: str|None=None, limit: int=12, offset: int=0):
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            q = select(SupportTicket).where(SupportTicket.tenant_id == tenant_id)
-            if status in {"open", "in_progress", "resolved", "closed"}:
-                q = q.where(SupportTicket.status == status)
-            rows = list((await session.execute(q.order_by(SupportTicket.id.desc()).offset(max(offset, 0)).limit(min(max(limit, 1), 50) + 1))).scalars().all())
-            return rows[:limit], len(rows) > limit
-
-    async def get(self, ticket_id: int) -> SupportTicket | None:
-        tenant_id = require_tenant()
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+            params={"t":require_tenant(),"n":min(max(limit,1),50)+1,"o":max(offset,0)}; where="tenant_id=:t"
+            if status in STATUS: where += " AND status=:s"; params["s"]=status
+            rows=list((await session.execute(text(f"SELECT * FROM representative_support_tickets WHERE {where} ORDER BY id DESC OFFSET :o LIMIT :n"),params)).mappings().all())
+            return rows[:limit], len(rows)>limit
+    async def get(self, ticket_id: int):
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            return await session.scalar(select(SupportTicket).where(SupportTicket.id == ticket_id, SupportTicket.tenant_id == tenant_id))
-
-    async def messages(self, ticket_id: int) -> list[SupportMessage]:
-        tenant_id = require_tenant()
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+            return (await session.execute(text("SELECT * FROM representative_support_tickets WHERE id=:id AND tenant_id=:t"), {"id":ticket_id,"t":require_tenant()})).mappings().first()
+    async def messages(self, ticket_id: int):
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            return list((await session.execute(select(SupportMessage).where(SupportMessage.ticket_id == ticket_id, SupportMessage.tenant_id == tenant_id).order_by(SupportMessage.id.asc()))).scalars().all())
-
-    async def add_message(self, ticket_id: int, sender_id: int, sender_role: str, body: str) -> SupportMessage:
-        tenant_id = require_tenant()
-        body = body.strip()[:4000]
-        if not body:
-            raise ValueError("متن پیام الزامی است.")
-        if sender_role not in {"user", "admin"}:
-            raise ValueError("نقش فرستنده نامعتبر است.")
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+            return list((await session.execute(text("SELECT * FROM representative_support_messages WHERE ticket_id=:id AND tenant_id=:t ORDER BY id ASC"), {"id":ticket_id,"t":require_tenant()})).mappings().all())
+    async def add_message(self, ticket_id: int, sender_id: int, sender_role: str, body: str):
+        if sender_role not in {"user","admin"}: raise ValueError("نقش فرستنده نامعتبر است.")
+        body=body.strip()[:4000]
+        if not body: raise ValueError("متن پیام الزامی است.")
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            ticket = await session.scalar(select(SupportTicket).where(SupportTicket.id == ticket_id, SupportTicket.tenant_id == tenant_id))
-            if ticket is None:
-                raise LookupError("تیکت پیدا نشد.")
-            if ticket.status == "closed":
-                raise ValueError("این تیکت بسته شده است.")
-            row = SupportMessage(ticket_id=ticket_id, tenant_id=tenant_id, sender_id=sender_id, sender_role=sender_role, body=body)
-            session.add(row)
-            ticket.status = "in_progress" if sender_role == "admin" else "open"
-            await session.commit()
-            await session.refresh(row)
-            return row
-
-    async def set_status(self, ticket_id: int, status: str) -> SupportTicket:
-        tenant_id = require_tenant()
-        if status not in {"open", "in_progress", "resolved", "closed"}:
-            raise ValueError("وضعیت نامعتبر است.")
-        if SessionFactory is None:
-            raise RuntimeError("DATABASE_URL is not configured")
+            t=require_tenant(); ticket=(await session.execute(text("SELECT * FROM representative_support_tickets WHERE id=:id AND tenant_id=:t"), {"id":ticket_id,"t":t})).mappings().first()
+            if not ticket: raise LookupError("تیکت پیدا نشد.")
+            if ticket["status"]=="closed": raise ValueError("این تیکت بسته شده است.")
+            await session.execute(text("INSERT INTO representative_support_messages (ticket_id,tenant_id,sender_id,sender_role,body) VALUES (:id,:t,:u,:r,:b)"), {"id":ticket_id,"t":t,"u":sender_id,"r":sender_role,"b":body})
+            new_status="in_progress" if sender_role=="admin" else "open"
+            await session.execute(text("UPDATE representative_support_tickets SET status=:s,updated_at=now() WHERE id=:id AND tenant_id=:t"), {"s":new_status,"id":ticket_id,"t":t})
+            await session.commit(); return await self.get(ticket_id)
+    async def set_status(self, ticket_id: int, status: str):
+        if status not in STATUS: raise ValueError("وضعیت نامعتبر است.")
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            ticket = await session.scalar(select(SupportTicket).where(SupportTicket.id == ticket_id, SupportTicket.tenant_id == tenant_id))
-            if ticket is None:
-                raise LookupError("تیکت پیدا نشد.")
-            ticket.status = status
-            await session.commit()
-            await session.refresh(ticket)
-            return ticket
-
-
-SERVICE = SupportService()
+            row=(await session.execute(text("UPDATE representative_support_tickets SET status=:s,updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING *"), {"s":status,"id":ticket_id,"t":require_tenant()})).mappings().first()
+            if not row: raise LookupError("تیکت پیدا نشد.")
+            await session.commit(); return row
+SERVICE=SupportService()
