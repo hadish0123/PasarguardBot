@@ -38,6 +38,18 @@ PAGES: tuple[PageSpec, ...] = (
         dependencies=("SQLAlchemy", "PostgreSQL-compatible DATABASE_URL", "Telethon"),
     ),
     PageSpec(
+        id="C-02",
+        area=Area.CENTRAL,
+        title="Representative Registration Wizard",
+        purpose="Collect, validate and securely persist the bot and Pasarguard panel credentials required to submit a representative request.",
+        entry=("central:registration:continue", "C-01 register"),
+        buttons=("continue", "previous", "confirm", "cancel"),
+        states=("brand", "bot_token", "bot_id", "panel_url", "panel_username", "panel_api_key", "review", "pending", "error"),
+        permission="private Telegram chat; current owner can edit only their draft",
+        data_scope="central database, owner-scoped draft",
+        dependencies=("Telegram Bot API", "Pasarguard API", "Fernet SECRET_KEY", "SQLAlchemy", "Telethon"),
+    ),
+    PageSpec(
         id="A-01",
         area=Area.ADMIN,
         title="Representative Dashboard",
