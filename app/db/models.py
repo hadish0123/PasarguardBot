@@ -111,3 +111,19 @@ class UserBalanceLog(Base):
     amount: Mapped[float] = mapped_column(Float)
     reason: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Order(Base):
+    __tablename__ = "representative_orders"
+    __table_args__ = (UniqueConstraint("tenant_id", "id", name="uq_order_tenant_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    plan_id: Mapped[int] = mapped_column(Integer, index=True)
+    plan_name: Mapped[str] = mapped_column(String(120))
+    volume_gb: Mapped[float] = mapped_column(Float)
+    days: Mapped[int] = mapped_column(Integer)
+    amount: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
