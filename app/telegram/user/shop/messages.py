@@ -63,10 +63,7 @@ async def buy_service_handler(event: Message):
     user_id = event.sender_id
     lang = await _user_lang(user_id)
     setting = await SettingsManager().get_settings()
-    # The central sale switch controls the central shop. A representative bot
-    # is isolated to its own tenant/panel and must not inherit a disabled
-    # central switch, otherwise every newly provisioned representative bot is
-    # permanently unable to sell configurations.
+    # Central sale_mode is intentionally not inherited by representative tenants.
     if not is_representative_runtime() and setting and not setting.sale_mode:
         await event.respond("⛔️ فروش توسط ادمین بسته است.", buttons=await bhome_buttons(user_id, lang))
         raise events.StopPropagation
@@ -74,10 +71,7 @@ async def buy_service_handler(event: Message):
     panel_manager = PanelsManager()
     panels = await panel_manager.get_available_panels()
     if not panels:
-        await event.respond(
-            "❌ در حال حاضر هیچ پنل فعالی برای فروش وجود ندارد.",
-            buttons=await bhome_buttons(user_id, lang),
-        )
+        await event.respond("❌ در حال حاضر هیچ پنل فعالی برای فروش وجود ندارد.", buttons=await bhome_buttons(user_id, lang))
         raise events.StopPropagation
 
     remove_keyboard_msg = await event.respond("⏳", buttons=Button.clear())
@@ -88,14 +82,10 @@ async def buy_service_handler(event: Message):
         await show_buy_vpn_plans(event, panels[0], lang=lang, back_data="DataCancel")
         raise events.StopPropagation
 
-    service_buttons = []
-    for panel in panels:
-        service_buttons.append(await build_panel_display_button(panel, f"BuyVPN_{panel.code}"))
-
+    service_buttons = [await build_panel_display_button(panel, f"BuyVPN_{panel.code}") for panel in panels]
     service_rows = await build_buy_service_selection_rows(service_buttons)
     await set_step(user_id, "selectService")
-    buy_intro = await _buy_intro_text(lang)
-    await Kenzo.send_message(entity=user_id, message=buy_intro, buttons=service_rows)
+    await Kenzo.send_message(entity=user_id, message=await _buy_intro_text(lang), buttons=service_rows)
     raise events.StopPropagation
 
 
@@ -154,17 +144,8 @@ async def custom_buy_input_handler(event: Message):
             await set_step(user_id, "custom_buy_enter_gb")
             await _edit("❌ ابتدا حجم را وارد کنید.")
             raise events.StopPropagation
-
         price = calculate_custom_buy_price_from_settings(settings, storage_gb=float(gig), duration_days=days)
-        await set_data_many(
-            user_id,
-            {
-                "custom_days": days,
-                "custom_price": price,
-                "custom_ip_limit": int(settings["ip_limit"]),
-                "selected_plan_id": CUSTOM_PLAN_ID,
-            },
-        )
+        await set_data_many(user_id, {"custom_days": days, "custom_price": price, "custom_ip_limit": int(settings["ip_limit"]), "selected_plan_id": CUSTOM_PLAN_ID})
         await set_step(user_id, "enter_username")
         username_message = await get_bot_text(
             key="enter_username_message",
@@ -194,7 +175,6 @@ async def buy_username_message_handler(event: Message):
         if e.response.status_code != 404:
             await event.respond("خطا در ارتباط با پنل", buttons=retry_buttons)
             raise events.StopPropagation from None
-
     await _confirm_buy_username(event, username, edit=False)
     raise events.StopPropagation
 
@@ -222,7 +202,6 @@ async def buy_discount_code_handler(event: Message):
         await clear_user(event.sender_id)
         await set_step(event.sender_id, "home")
         raise events.StopPropagation
-
     new_amount = int(plan.price - (plan.price * (res.discount_percentage / 100)))
     try:
         api = PasarguardAPI(base_url=panel.base_url)
@@ -231,30 +210,22 @@ async def buy_discount_code_handler(event: Message):
         locations = " ⌁ ".join([f"{node.name}" for node in filtered_nodes]) or " "
     except httpx.HTTPStatusError as e:
         locations = "🇺🇸 🇹🇷 🇫🇮 🇩🇪 🇦🇲 " if e.response.status_code == 403 else "❌ خطا در دریافت نودها، لطفاً دوباره تلاش کنید."
-
     ip_limit_text = format_ip_limit(getattr(plan, "ip_limit", 0))
     volume_text = convert_storage(float(gig), getattr(plan, "plan_type", None), getattr(plan, "data_limit_reset_strategy", None))
     confirm_text_template = await get_bot_text(
         key="config_purchase_discount_confirm",
-        default=(
-            "**ساخت کانفیگ اختصاصی V2Ray با مشخصات زیر را تأیید می‌کنید؟**\n\n"
-            "**▪️ حجم سرویس :** {volume}\n**⏰ مدت زمان :** {duration} روز\n"
-            "**▫️نام کانفیگ :** `{config_name}`\n**▫️نوع کانفیگ :** {config_type}\n"
-            "**▫️ لوکیشن های موجودسرویس :** \n**^qc^{locations}^qc^**\n"
-            "**🔌 محدودیت کاربر :** {user_limit}\n**💸 مبلغ قبل:** `{original_price}` **مبلغ جدید:** `{new_price}`"
-        ),
+        default=("**ساخت کانفیگ اختصاصی V2Ray با مشخصات زیر را تأیید می‌کنید؟**\n\n"
+                 "**▪️ حجم سرویس :** {volume}\n**⏰ مدت زمان :** {duration} روز\n"
+                 "**▫️نام کانفیگ :** `{config_name}`\n**▫️نوع کانفیگ :** {config_type}\n"
+                 "**▫️ لوکیشن های موجودسرویس :** \n**^qc^{locations}^qc^**\n"
+                 "**🔌 محدودیت کاربر :** {user_limit}\n**💸 مبلغ قبل:** `{original_price}` **مبلغ جدید:** `{new_price}`\n"
+                 "❗️ نکته؛\n(پس از خرید؛ امکان افزایش حجم وجود دارد و همچنین مقدار باقیمانده حجم و روز از بخش سرویس‌های من قابل مشاهده است)"),
         lang="fa",
     )
-    confirm_text = (
-        confirm_text_template.replace("{volume}", volume_text)
-        .replace("{duration}", str(plan.duration))
-        .replace("{config_name}", username or "")
-        .replace("{config_type}", panel.name)
-        .replace("{locations}", locations)
-        .replace("{user_limit}", ip_limit_text)
-        .replace("{original_price}", f"{int(plan.price):,}")
-        .replace("{new_price}", f"{int(new_amount):,}")
-    )
+    confirm_text = (confirm_text_template.replace("{volume}", volume_text).replace("{duration}", str(plan.duration))
+                    .replace("{config_name}", username or "").replace("{config_type}", panel.name)
+                    .replace("{locations}", locations).replace("{user_limit}", ip_limit_text)
+                    .replace("{original_price}", f"{int(plan.price):,}").replace("{new_price}", f"{int(new_amount):,}"))
     confirm_buttons = [[Button.inline("🎉 کد تخفیف اعمال شد", "none")], *(await build_buy_confirm_button_rows(confirm_data="Confirm_buy", with_discount=False))]
     await event.respond(confirm_text, buttons=confirm_buttons, link_preview=False)
     await set_data(event.sender_id, "codetakhfif", res.code)
@@ -275,15 +246,11 @@ async def custom_buy_input_filter(event: Message) -> bool:
 async def buy_service_filter(event: Message) -> bool:
     if event.is_channel or not event.is_private:
         return False
-    if await get_step(event.sender_id) == "ban":
+    if await get_step(event.sender_id) == "ban" or is_keyboard_config_step(await get_step(event.sender_id)):
         return False
-    if is_keyboard_config_step(await get_step(event.sender_id)):
-        return False
-
     msg = event.message.text or event.message.message or ""
     if not msg:
         return False
-
     param = extract_start_param(event)
     if param and param.lower() == "buy":
         return True
@@ -303,7 +270,6 @@ async def account_discount_message_filter(event: Message) -> bool:
 
 def register(client):
     client.add_event_handler(buy_service_handler, events.NewMessage(incoming=True, func=buy_service_filter))
-    client.add_event_handler(buy_username_message_handler, events.NewMessage(incoming=True, func=buy_username_message_filter))
     client.add_event_handler(custom_buy_input_handler, events.NewMessage(incoming=True, func=custom_buy_input_filter))
+    client.add_event_handler(buy_username_message_handler, events.NewMessage(incoming=True, func=buy_username_message_filter))
     client.add_event_handler(buy_discount_code_handler, events.NewMessage(incoming=True, func=buy_discount_code_filter))
-    client.add_event_handler(account_discount_message_handler, events.NewMessage(incoming=True, func=account_discount_message_filter))
