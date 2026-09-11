@@ -19,15 +19,36 @@ def new_tracking_code() -> str:
 class RegistrationStore:
     """Persistence boundary for central representative registration records."""
 
-    async def create_draft(self, owner_id: int) -> RepresentativeRegistration:
+    async def create_or_resume_draft(self, owner_id: int) -> RepresentativeRegistration:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
+            result = await session.execute(
+                select(RepresentativeRegistration)
+                .where(
+                    RepresentativeRegistration.owner_id == owner_id,
+                    RepresentativeRegistration.status.in_(
+                        (
+                            RegistrationStatus.DRAFT.value,
+                            RegistrationStatus.PENDING.value,
+                            RegistrationStatus.PROVISIONING.value,
+                        )
+                    ),
+                )
+                .order_by(RepresentativeRegistration.id.desc())
+                .limit(1)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                return existing
             record = RepresentativeRegistration(owner_id=owner_id, tracking_code=new_tracking_code())
             session.add(record)
             await session.commit()
             await session.refresh(record)
             return record
+
+    async def create_draft(self, owner_id: int) -> RepresentativeRegistration:
+        return await self.create_or_resume_draft(owner_id)
 
     async def get_by_tracking_code(self, owner_id: int, tracking_code: str) -> RepresentativeRegistration | None:
         if SessionFactory is None:
