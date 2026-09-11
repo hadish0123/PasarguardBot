@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+
+from sqlalchemy import BigInteger, DateTime, Integer, String, Text, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class RegistrationStatus(StrEnum):
+    DRAFT = "draft"
+    PENDING = "pending"
+    PROVISIONING = "provisioning"
+    ACTIVE = "active"
+    REJECTED = "rejected"
+
+
+class RepresentativeRegistration(Base):
+    __tablename__ = "representative_registrations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tracking_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    bot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    panel_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    panel_username: Mapped[str | None] = mapped_column(String(190), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default=RegistrationStatus.DRAFT.value, index=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
