@@ -20,39 +20,35 @@ async def register_handler(event, tenant_id):
         user = await USER_SERVICE.get_by_telegram_id(event.sender_id)
         if not user or user.blocked:
             return await event.answer("دسترسی ندارید.", alert=True)
-        data = event.data or b""
-        # Acknowledge valid navigation callbacks before doing database/text work.
+        data = bytes(event.data or b"")
         await event.answer()
         if data == HOME:
+            values = await TEXT_SERVICE.all()
             return await event.edit(
-                await TEXT_SERVICE.get("shop_title") + "\n\n" + await TEXT_SERVICE.get("shop_hint"),
-                buttons=await customer_menu(),
+                values["shop_title"] + "\n\n" + values["shop_hint"],
+                buttons=await customer_menu(values),
             )
         if data == BUY:
             plans = [p for p in await PlanService().list() if p.enabled]
             if not plans:
                 return await event.edit(
-                    await TEXT_SERVICE.get("buy_title") + "\n\n" + await TEXT_SERVICE.get("plans_empty"),
+                    (await TEXT_SERVICE.all())["buy_title"] + "\n\n" + (await TEXT_SERVICE.all())["plans_empty"],
                     buttons=[[Button.inline("🔙 فروشگاه", HOME)]],
                 )
             rows = [
-                [
-                    Button.inline(
-                        f"📦 {p.name} | {p.volume_gb:g}GB / {p.days}روز | {p.price:g}",
-                        ORDER + str(p.id).encode(),
-                    )
-                ]
+                [Button.inline(f"📦 {p.name} | {p.volume_gb:g}GB / {p.days}روز | {p.price:g}", ORDER + str(p.id).encode())]
                 for p in plans
             ]
             rows.append([Button.inline("🔙 فروشگاه", HOME)])
+            values = await TEXT_SERVICE.all()
             return await event.edit(
-                await TEXT_SERVICE.get("buy_title") + "\n\n" + await TEXT_SERVICE.get("buy_hint"),
+                values["buy_title"] + "\n\n" + values["buy_hint"],
                 buttons=rows,
             )
 
 
-async def customer_menu():
-    values = await TEXT_SERVICE.all()
+async def customer_menu(values: dict | None = None):
+    values = values or await TEXT_SERVICE.all()
     return [
         [Button.inline(values["buy_button"], BUY)],
         [Button.inline(values["services_button"], b"user:services"), Button.inline(values["wallet_button"], b"user:wallet")],
