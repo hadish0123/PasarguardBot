@@ -85,19 +85,32 @@ class _Builder:
 
 
 class NewMessage(_Builder):
-    pass
+    async def matches(self, event):
+        if event.__class__.__name__ != "_Message":
+            return False
+        return await super().matches(event)
 
 
 class CallbackQuery(_Builder):
-    pass
+    async def matches(self, event):
+        if event.__class__.__name__ != "_CallbackEvent":
+            return False
+        return await super().matches(event)
 
 
 class ChatAction(_Builder):
-    pass
+    async def matches(self, event):
+        if not getattr(event, "_chat_action", False):
+            return False
+        return await super().matches(event)
 
 
 class Raw(_Builder):
-    pass
+    async def matches(self, event):
+        # The Bot API runtime does not expose MTProto Raw updates. Keeping Raw
+        # handlers registered preserves the existing plugin surface while
+        # preventing them from accidentally receiving message/callback events.
+        return False
 
 
 NewMessage.Event = object
