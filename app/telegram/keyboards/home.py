@@ -2,42 +2,41 @@
 
 from app.custom_telethon.button import Button
 from app.db.crud.keyboards import KeyboardButtonCRUD
-from app.db.crud.settings import SettingsManager
 from app.db.crud.user import UserCRUD
-from app.db.models.settings import DEFAULT_HOME_MENU_SETTINGS
 from app.runtime.context import is_runtime_admin
-from config import DISABLE_UPTIME_BUTTONS
 
 from .common import _get_keyboard_button_config, styled_reply_button
 
 
-def _home_menu_enabled(setting, attr: str) -> bool:
-    default = bool(DEFAULT_HOME_MENU_SETTINGS.get(attr, True))
-    if setting is None:
-        return default
-    return bool(getattr(setting, attr, default))
-
-
 async def bhome_buttons(user_id, lang):
-    """Build the canonical user menu used by both central and representative runtimes.
+    """Build the canonical user home menu.
 
-    The seven primary user actions stay consistent across tenants. Optional legacy
-    reseller/trial/uptime entries are intentionally kept out of the main menu so the
-    user experience remains stable and focused; their flows remain available through
-    their dedicated entry points where applicable.
+    The customer-facing menu is intentionally stable and always exposes the seven
+    core actions. Their configured labels/styles can still be customized from the
+    admin keyboard settings, but an admin cannot accidentally hide a core action
+    from the home menu by disabling an unrelated feature flag.
     """
     keyboard_crud = KeyboardButtonCRUD()
-    menu_my_services, menu_my_services_style = await _get_keyboard_button_config(
-        keyboard_crud, "bt.menu_my_services", "🔑 سرویس های من", default_style="primary", default_icon=5895443668663275064
-    )
+
     menu_buy_service, menu_buy_service_style = await _get_keyboard_button_config(
-        keyboard_crud, "bt.menu_buy_service", "🛍 خرید سرویس", default_style="success", default_icon=5373052667671093676
+        keyboard_crud,
+        "bt.menu_buy_service",
+        "🛍 خرید سرویس",
+        default_style="success",
+        default_icon=5373052667671093676,
     )
-    menu_profile, menu_profile_style = await _get_keyboard_button_config(
-        keyboard_crud, "bt.menu_profile", "🙍 پروفایل من"
+    menu_my_services, menu_my_services_style = await _get_keyboard_button_config(
+        keyboard_crud,
+        "bt.menu_my_services",
+        "🔑 سرویس های من",
+        default_style="primary",
+        default_icon=5895443668663275064,
     )
     menu_add_balance, menu_add_balance_style = await _get_keyboard_button_config(
         keyboard_crud, "bt.menu_add_balance", "💰 افزایش موجودی"
+    )
+    menu_profile, menu_profile_style = await _get_keyboard_button_config(
+        keyboard_crud, "bt.menu_profile", "🙍 پروفایل من"
     )
     menu_support, menu_support_style = await _get_keyboard_button_config(
         keyboard_crud, "bt.menu_support", "☎️ پشتیبانی"
@@ -52,11 +51,14 @@ async def bhome_buttons(user_id, lang):
         keyboard_crud, "bt.menu_admin_panel", "⚙️ پنل مدیریت"
     )
 
-    # Keep the user object lookup here because some deployments use it for the
-    # configured home-menu conditions and future menu extensions.
+    # Keep the user lookup for deployments that rely on the user record being
+    # initialized before rendering the home keyboard.
     await UserCRUD().read_user(user_id=user_id)
-    setting = await SettingsManager().get_settings()
 
+    # Canonical customer menu requested by the product:
+    # خرید سرویس / سرویس های من / افزایش موجودی / پروفایل / پشتیبانی / راهنما /
+    # تنظیمات پیشرفته. Keep the layout stable across central and representative
+    # runtimes so both experiences behave identically.
     keyboard: list[list] = [
         [
             styled_reply_button(menu_buy_service, menu_buy_service_style),
@@ -66,23 +68,15 @@ async def bhome_buttons(user_id, lang):
             styled_reply_button(menu_add_balance, menu_add_balance_style),
             styled_reply_button(menu_profile, menu_profile_style),
         ],
+        [
+            styled_reply_button(menu_support, menu_support_style),
+            styled_reply_button(menu_help, menu_help_style),
+        ],
+        [styled_reply_button(menu_advanced_settings, menu_advanced_settings_style)],
     ]
 
-    utility_row = []
-    if _home_menu_enabled(setting, "support_mode"):
-        utility_row.append(styled_reply_button(menu_support, menu_support_style))
-    if _home_menu_enabled(setting, "help_mode"):
-        utility_row.append(styled_reply_button(menu_help, menu_help_style))
-    if not DISABLE_UPTIME_BUTTONS:
-        # Uptime remains intentionally available only through its existing dedicated
-        # flow; it is not part of the canonical seven-button home menu.
-        pass
-    if utility_row:
-        keyboard.append(utility_row)
-
-    if _home_menu_enabled(setting, "advanced_settings_mode"):
-        keyboard.append([styled_reply_button(menu_advanced_settings, menu_advanced_settings_style)])
-
+    # Management access remains an additional row only for runtime admins; it is
+    # never shown to ordinary customers or representatives' end users.
     if is_runtime_admin(user_id):
         keyboard.append([styled_reply_button(menu_admin_panel, menu_admin_panel_style)])
 
