@@ -44,7 +44,7 @@ async def admin_text(event):
         return
     text = event.raw_text.strip()
     if text == "/admin":
-        return await admin_start(event)
+        return
 
     if event.sender_id in _AWAITING_BOT_ID:
         _AWAITING_BOT_ID.discard(event.sender_id)
