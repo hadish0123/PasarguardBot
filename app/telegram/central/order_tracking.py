@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from telethon import Button, events
 
-from app.db.models import CheckoutRecord, Order, ServiceSubscription, TenantRecord
+from app.db.models import CheckoutRecord, Order, RepresentativeRegistration, ServiceSubscription, TenantRecord
 from app.db.session import SessionFactory
 from app.services.central_admin import CentralAdminService
 from app.services.pasarguard_provisioning import PasarguardProvisioningService
@@ -56,15 +56,6 @@ async def _find_tracking(code: str):
     code = code.strip().upper()
     async with SessionFactory() as session:
         result = await session.execute(
-            select(Order, CheckoutRecord, ServiceSubscription, TenantRecord)
-            .outerjoin(CheckoutRecord, (CheckoutRecord.order_id == Order.id) & (CheckoutRecord.tenant_id == Order.tenant_id))
-            .outerjoin(ServiceSubscription, (ServiceSubscription.order_id == Order.id) & (ServiceSubscription.tenant_id == Order.tenant_id))
-            .join(TenantRecord, TenantRecord.id == Order.tenant_id)
-            .where(Order.id == select(Order.id).where(Order.id == Order.id).scalar_subquery())
-        )
-        # Order does not have a tracking_code column; representative registration owns the PG code.
-        from app.db.models import RepresentativeRegistration
-        result = await session.execute(
             select(Order, CheckoutRecord, ServiceSubscription, TenantRecord, RepresentativeRegistration)
             .outerjoin(CheckoutRecord, (CheckoutRecord.order_id == Order.id) & (CheckoutRecord.tenant_id == Order.tenant_id))
             .outerjoin(ServiceSubscription, (ServiceSubscription.order_id == Order.id) & (ServiceSubscription.tenant_id == Order.tenant_id))
@@ -76,11 +67,24 @@ async def _find_tracking(code: str):
         return result.first()
 
 
-async def _get_order(order_id: int):
+async def _find_order_row(order_id: int):
     if SessionFactory is None:
         raise RuntimeError("DATABASE_URL is not configured")
     async with SessionFactory() as session:
-        return await session.scalar(select(Order).where(Order.id == order_id))
+        result = await session.execute(
+            select(Order, CheckoutRecord, ServiceSubscription, TenantRecord, RepresentativeRegistration)
+            .outerjoin(CheckoutRecord, (CheckoutRecord.order_id == Order.id) & (CheckoutRecord.tenant_id == Order.tenant_id))
+            .outerjoin(ServiceSubscription, (ServiceSubscription.order_id == Order.id) & (ServiceSubscription.tenant_id == Order.tenant_id))
+            .join(TenantRecord, TenantRecord.id == Order.tenant_id)
+            .join(RepresentativeRegistration, RepresentativeRegistration.id == TenantRecord.registration_id)
+            .where(Order.id == order_id)
+        )
+        return result.first()
+
+
+async def _get_order(order_id: int):
+    row = await _find_order_row(order_id)
+    return row[0] if row else None
 
 
 async def _set_paid_admin(order_id: int):
@@ -142,7 +146,7 @@ async def _cancel_order(order_id: int):
         return order
 
 
-def _buttons(order, subscription, tracking_code: str):
+def _buttons(order, subscription):
     rows = []
     if order.status == "pending":
         rows.append([Button.inline("💳 تأیید پرداخت و آماده‌سازی", PREFIX + f"paid:{order.id}".encode())])
@@ -160,13 +164,12 @@ def _buttons(order, subscription, tracking_code: str):
 
 def _detail(row) -> tuple[str, list[list[Button]]]:
     order, checkout, subscription, tenant, registration = row
-    tracking_code = registration.tracking_code
     payment_ref = checkout.payment_reference if checkout else None
     service_status = subscription.status if subscription else "ساخته نشده"
     service_id = subscription.provider_service_id if subscription else None
     text = (
         "🧾 **مدیریت کامل سفارش**\n\n"
-        f"🆔 کد پیگیری: `{tracking_code}`\n"
+        f"🆔 کد پیگیری: `{registration.tracking_code}`\n"
         f"📦 شماره سفارش: `{order.id}`\n"
         f"📌 وضعیت سفارش: **{order.status}**\n"
         f"🤖 ربات نمایندگی: @{tenant.bot_username or '—'}\n"
@@ -184,7 +187,7 @@ def _detail(row) -> tuple[str, list[list[Button]]]:
         f"🕐 ایجاد سفارش: {_dt(order.created_at)}\n"
         f"🕐 آخرین بروزرسانی: {_dt(order.updated_at)}"
     )
-    return text, _buttons(order, subscription, tracking_code)
+    return text, _buttons(order, subscription)
 
 
 async def order_tracking_callback(event):
@@ -207,17 +210,7 @@ async def order_tracking_callback(event):
             return
         if action.startswith("view:"):
             order_id = int(action.split(":", 1)[1])
-            if SessionFactory is None:
-                raise RuntimeError("DATABASE_URL is not configured")
-            async with SessionFactory() as session:
-                row = (await session.execute(
-                    select(Order, CheckoutRecord, ServiceSubscription, TenantRecord, __import__('app.db.models', fromlist=['RepresentativeRegistration']).RepresentativeRegistration)
-                    .outerjoin(CheckoutRecord, (CheckoutRecord.order_id == Order.id) & (CheckoutRecord.tenant_id == Order.tenant_id))
-                    .outerjoin(ServiceSubscription, (ServiceSubscription.order_id == Order.id) & (ServiceSubscription.tenant_id == Order.tenant_id))
-                    .join(TenantRecord, TenantRecord.id == Order.tenant_id)
-                    .join(__import__('app.db.models', fromlist=['RepresentativeRegistration']).RepresentativeRegistration, __import__('app.db.models', fromlist=['RepresentativeRegistration']).RepresentativeRegistration.id == TenantRecord.registration_id)
-                    .where(Order.id == order_id)
-                )).first()
+            row = await _find_order_row(order_id)
             if not row:
                 raise LookupError("سفارش پیدا نشد.")
             text, buttons = _detail(row)
@@ -231,27 +224,23 @@ async def order_tracking_callback(event):
                 raise LookupError("سفارش پیدا نشد.")
             if action_name == "paid":
                 await _set_paid_admin(order_id)
-                text = "💳 پرداخت توسط مدیریت مرکزی تأیید شد و سفارش آماده ساخت سرویس است."
+                message = "💳 پرداخت توسط مدیریت مرکزی تأیید شد و سفارش آماده ساخت سرویس است."
             elif action_name == "provision":
                 if order.status != "paid":
                     raise ValueError("ابتدا پرداخت سفارش را تأیید کنید.")
                 subscription = await PasarguardProvisioningService().provision_paid_order(order.id, tenant_id=order.tenant_id)
-                text = "⚡ سرویس در پاسارگارد ساخته و فعال شد." if subscription.status == "active" else "⚙️ ساخت سرویس انجام شد ولی هنوز فعال نشده است."
+                message = "⚡ سرویس در پاسارگارد ساخته و فعال شد." if subscription.status == "active" else "⚙️ ساخت سرویس انجام شد ولی هنوز فعال نشده است."
             elif action_name == "fulfilled":
                 await _mark_fulfilled(order_id)
-                text = "✅ سفارش تکمیل شد."
+                message = "✅ سفارش تکمیل شد."
             elif action_name == "cancel":
                 await _cancel_order(order_id)
-                text = "🗑 سفارش لغو شد."
+                message = "🗑 سفارش لغو شد."
             else:
                 raise LookupError("عملیات ناشناخته است.")
-            if SessionFactory is None:
-                raise RuntimeError("DATABASE_URL is not configured")
-            async with SessionFactory() as session:
-                from app.db.models import RepresentativeRegistration
-                row = (await session.execute(select(Order, CheckoutRecord, ServiceSubscription, TenantRecord, RepresentativeRegistration).outerjoin(CheckoutRecord, (CheckoutRecord.order_id == Order.id) & (CheckoutRecord.tenant_id == Order.tenant_id)).outerjoin(ServiceSubscription, (ServiceSubscription.order_id == Order.id) & (ServiceSubscription.tenant_id == Order.tenant_id)).join(TenantRecord, TenantRecord.id == Order.tenant_id).join(RepresentativeRegistration, RepresentativeRegistration.id == TenantRecord.registration_id).where(Order.id == order_id))).first()
+            row = await _find_order_row(order_id)
             detail, buttons = _detail(row)
-            await event.edit(f"{text}\n\n{detail}", buttons=buttons)
+            await event.edit(f"{message}\n\n{detail}", buttons=buttons)
             return
     except Exception as exc:
         print(f"[central-admin-orders] CALLBACK ERROR: {type(exc).__name__}: {exc}", flush=True)
@@ -264,7 +253,7 @@ async def order_tracking_text(event):
     if event.sender_id not in _AWAITING_TRACKING:
         return
     text = event.raw_text.strip().upper()
-    if text == "/admin":
+    if text == "/ADMIN":
         return
     _AWAITING_TRACKING.discard(event.sender_id)
     if not text.startswith("PG-"):
