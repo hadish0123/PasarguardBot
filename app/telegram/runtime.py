@@ -5,6 +5,7 @@ import hashlib
 import html
 import logging
 
+import uvicorn
 from telethon import TelegramClient
 
 from app.core.config import settings
@@ -14,6 +15,7 @@ from app.telegram.central import register_central_handlers
 from app.telegram.central.admin import register_central_admin_handlers
 from app.telegram.central.order_tracking import install_order_tracking
 from app.telegram.representative.registry import registry
+from app.web_admin import create_web_admin_app
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +32,6 @@ async def _safe_edit_message(self, entity, message_id: int, text: str, *, button
         return await _original_edit_message(self, entity, message_id, text, buttons=buttons, **kwargs)
     except RuntimeError as exc:
         message = str(exc).lower()
-        # Telegram raises MessageNotModifiedError when the requested content
-        # and markup are already identical. This is a successful no-op from
-        # the bot user's perspective and must never surface as a UI failure.
         if "message is not modified" in message:
             logger.debug("Telegram edit skipped: message is not modified")
             return None
@@ -66,12 +65,7 @@ async def _start_representative(tenant) -> bool:
 
 
 async def _restore_representative_runtimes(tenants) -> tuple[int, int]:
-    """Restore bots concurrently with a bounded fan-out.
-
-    A single invalid/dead bot must never block the rest of the fleet. The
-    semaphore protects Telegram/API and local resources while still allowing
-    a large fleet to recover much faster than sequential startup.
-    """
+    """Restore bots concurrently with a bounded fan-out."""
     if not tenants:
         return 0, 0
     semaphore = asyncio.Semaphore(20)
@@ -84,9 +78,32 @@ async def _restore_representative_runtimes(tenants) -> tuple[int, int]:
     return sum(1 for ok in results if ok), sum(1 for ok in results if not ok)
 
 
+async def _start_web_server() -> uvicorn.Server:
+    """Start HTTP/Web Admin immediately; never depend on Telegram polling."""
+    app = create_web_admin_app()
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=settings.fastapi_port,
+        log_level="warning",
+        access_log=False,
+        loop="asyncio",
+    )
+    server = uvicorn.Server(config)
+    asyncio.create_task(server.serve(), name="web-admin-server")
+    logger.info("[web-admin] HTTP server starting on 0.0.0.0:%s", settings.fastapi_port)
+    return server
+
+
 async def run(stop_event: asyncio.Event | None = None) -> None:
     print("[telegram-runtime] run() entered", flush=True)
+
+    # The HTTP listener is deliberately started before Telegram. Railway's
+    # healthcheck must remain independent from Telegram startup/polling.
+    web_server = await _start_web_server()
+
     if not settings.central_bot_token:
+        web_server.should_exit = True
         raise RuntimeError("BOT_TOKEN is required")
 
     print("[telegram-runtime] initializing database", flush=True)
@@ -120,18 +137,16 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     )
 
     print("[telegram-runtime] entering update loop", flush=True)
-    if stop_event is None:
-        try:
-            await client.run_until_disconnected()
-        finally:
-            await _stop_representative_runtimes()
-        return
-
     try:
-        await stop_event.wait()
+        if stop_event is None:
+            await client.run_until_disconnected()
+        else:
+            await stop_event.wait()
     finally:
         await client.disconnect()
         await _stop_representative_runtimes()
+        web_server.should_exit = True
+        logger.info("[web-admin] HTTP server shutdown requested")
 
 
 async def _stop_representative_runtimes() -> None:
