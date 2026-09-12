@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
 
 from telethon import TelegramClient, events
 
@@ -10,11 +12,17 @@ from app.services.representative_users import SERVICE as USER_SERVICE
 from app.services.texts import SERVICE as TEXT_SERVICE
 from app.services.referrals import SERVICE as REFERRAL_SERVICE
 
+logger = logging.getLogger(__name__)
+
+
+def _token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+
 
 class RepresentativeRuntime:
     def __init__(self, tenant_id: str, bot_token: str):
         self.tenant_id = tenant_id
-        self.bot_token = bot_token
+        self.bot_token = bot_token.strip()
         self.client = TelegramClient(f"tenant-{tenant_id}")
         self.is_running = False
         self._polling_task: asyncio.Task | None = None
@@ -55,10 +63,6 @@ class RepresentativeRuntime:
 
     async def _start(self, event):
         async with tenant_dispatch(self.tenant_id):
-            # Keep the user chat clean: remove the bot's previous menu/messages
-            # and the /start message before rendering the new home. Telegram
-            # allows bots to delete their own outgoing messages and incoming
-            # private-chat messages, subject to Telegram's deletion limits.
             await asyncio.gather(
                 self.client.clear_bot_messages(event.chat_id),
                 event.delete(),
@@ -89,16 +93,37 @@ class RepresentativeRuntime:
         self.register()
         try:
             await self.client.start(bot_token=self.bot_token)
+            logger.info(
+                "[representative-runtime] initialized tenant=%s bot_id=%s bot_username=%s token_fp=%s",
+                self.tenant_id,
+                getattr(getattr(self.client, "_me", None), "id", "unknown"),
+                getattr(getattr(self.client, "_me", None), "username", "") or "",
+                _token_fingerprint(self.bot_token),
+            )
             self._polling_task = asyncio.create_task(
                 self.client.run_until_disconnected(),
                 name=f"representative-poll-{self.tenant_id}",
             )
+            self._polling_task.add_done_callback(self._polling_done)
             self.is_running = True
         except Exception:
             await self.client.disconnect()
             self._polling_task = None
             self.is_running = False
             raise
+
+    def _polling_done(self, task: asyncio.Task) -> None:
+        if self._polling_task is not task:
+            return
+        if task.cancelled():
+            logger.info("[representative-runtime] polling cancelled tenant=%s token_fp=%s", self.tenant_id, _token_fingerprint(self.bot_token))
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("[representative-runtime] polling task exited tenant=%s token_fp=%s error=%s", self.tenant_id, _token_fingerprint(self.bot_token), exc, exc_info=exc)
+        else:
+            logger.warning("[representative-runtime] polling task exited unexpectedly tenant=%s token_fp=%s", self.tenant_id, _token_fingerprint(self.bot_token))
+        self.is_running = False
 
     async def stop(self):
         task = self._polling_task
