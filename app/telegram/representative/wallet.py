@@ -11,6 +11,7 @@ from app.services.orders import SERVICE as ORDERS
 from app.services.representative_dashboard import RepresentativeDashboardService
 
 PREFIX = b"user:wallet:"
+ROOT_CALLBACK = b"user:wallet"
 STATE: dict[tuple[str, int], dict] = {}
 MIN_TOPUP = 5_000
 MAX_TOPUP = 100_000_000
@@ -28,7 +29,8 @@ def _digits(text: str) -> int:
 
 
 async def allowed(event):
-    if not event.is_private or not get_tenant(): return False
+    if not event.is_private or not get_tenant():
+        return False
     u = await USERS.get_by_telegram_id(event.sender_id)
     return bool(u and not u.blocked)
 
@@ -59,16 +61,19 @@ async def payment_card():
 
 
 async def render_callback(event):
-    action = event.data[len(PREFIX):].decode(errors="ignore")
+    data = event.data or b""
+    action = data[len(PREFIX):].decode(errors="ignore") if data.startswith(PREFIX) else "show"
     key = (get_tenant(), int(event.sender_id))
     state = STATE.setdefault(key, {})
     if action in ("", "show"):
         text, buttons = await render_wallet(event.sender_id)
-        await event.edit(text, buttons=buttons); return
+        await event.edit(text, buttons=buttons)
+        return
     if action == "topup":
         card, holder = await payment_card()
         if not card:
-            await event.answer("⚠️ شماره کارت و نام صاحب کارت توسط مدیریت تنظیم نشده است.", alert=True); return
+            await event.answer("⚠️ شماره کارت و نام صاحب کارت توسط مدیریت تنظیم نشده است.", alert=True)
+            return
         state["awaiting_topup_amount"] = True
         await event.answer()
         return await event.edit(
@@ -101,19 +106,25 @@ async def _notify_owner(event, order, receipt_label, photo_file_id=None):
 
 async def incoming(event, tenant_id):
     async with tenant_dispatch(tenant_id):
-        if not await allowed(event): return
-        key = (tenant_id, int(event.sender_id)); state = STATE.get(key)
-        if not state: return
+        if not await allowed(event):
+            return
+        key = (tenant_id, int(event.sender_id))
+        state = STATE.get(key)
+        if not state:
+            return
         text = (event.raw_text or "").strip()
         if text.lower() in {"/cancel", "لغو"}:
-            STATE.pop(key, None); return await event.respond("❌ عملیات لغو شد.")
+            STATE.pop(key, None)
+            return await event.respond("❌ عملیات لغو شد.")
         if state.get("awaiting_topup_amount"):
             try:
                 amount = _digits(text)
                 if amount < MIN_TOPUP or amount > MAX_TOPUP:
                     raise ValueError(f"مبلغ باید بین {_money(MIN_TOPUP)} تا {_money(MAX_TOPUP)} باشد.")
                 order = await ORDERS.create_wallet_topup(event.sender_id, amount)
-                state.clear(); state["topup_order_id"] = order.id; state["awaiting_topup_receipt"] = True
+                state.clear()
+                state["topup_order_id"] = order.id
+                state["awaiting_topup_receipt"] = True
                 card, holder = await payment_card()
                 return await event.respond(
                     f"🧾 **درخواست شارژ #{order.id} ثبت شد**\n\n💰 مبلغ: **{_money(amount)}**\n💳 کارت مقصد: `{card}`\n👤 به نام: **{holder}**\n\nپس از واریز، تصویر رسید یا کد پیگیری را همینجا ارسال کنید.",
@@ -127,15 +138,24 @@ async def incoming(event, tenant_id):
                 photo_payload = (getattr(event, "_message_payload", {}) or {}).get("photo") or []
                 if photo_payload:
                     file_id = photo_payload[-1].get("file_id")
-                    if not file_id: raise ValueError("شناسه تصویر رسید پیدا نشد.")
-                    await ORDERS.submit_payment(order_id, f"photo:{file_id}"); label = "تصویر رسید"; photo = file_id
+                    if not file_id:
+                        raise ValueError("شناسه تصویر رسید پیدا نشد.")
+                    await ORDERS.submit_payment(order_id, f"photo:{file_id}")
+                    label = "تصویر رسید"
+                    photo = file_id
                 else:
-                    if not text: return await event.respond("📎 تصویر رسید یا کد پیگیری را ارسال کنید.")
-                    await ORDERS.submit_payment(order_id, text); label = text[:80]; photo = None
+                    if not text:
+                        return await event.respond("📎 تصویر رسید یا کد پیگیری را ارسال کنید.")
+                    await ORDERS.submit_payment(order_id, text)
+                    label = text[:80]
+                    photo = None
                 order = await ORDERS.get(order_id)
                 await _notify_owner(event, order, label, photo)
                 STATE.pop(key, None)
-                return await event.respond(f"✅ رسید شارژ **#{order_id}** دریافت شد.\n\n🕐 وضعیت: در انتظار تأیید مدیریت.", buttons=[[Button.inline("💳 کیف پول", PREFIX+b"show")],[Button.inline("🏪 فروشگاه", b"user:home")]])
+                return await event.respond(
+                    f"✅ رسید شارژ **#{order_id}** دریافت شد.\n\n🕐 وضعیت: در انتظار تأیید مدیریت.",
+                    buttons=[[Button.inline("💳 کیف پول", PREFIX + b"show")], [Button.inline("🏪 فروشگاه", b"user:home")]],
+                )
             except (LookupError, ValueError) as exc:
                 return await event.respond(f"❌ {exc}")
 
@@ -143,8 +163,17 @@ async def incoming(event, tenant_id):
 def register(client, tenant_id=None):
     async def callback(event):
         async with tenant_dispatch(tenant_id):
-            if not await allowed(event): return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
-            await event.answer(); await render_callback(event)
-    client.add_event_handler(callback, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
-    async def msg(event): await incoming(event, tenant_id)
+            if not await allowed(event):
+                return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
+            await event.answer()
+            await render_callback(event)
+
+    client.add_event_handler(
+        callback,
+        events.CallbackQuery(func=lambda e: bool(e.data and (e.data == ROOT_CALLBACK or e.data.startswith(PREFIX)))),
+    )
+
+    async def msg(event):
+        await incoming(event, tenant_id)
+
     client.add_event_handler(msg, events.NewMessage(incoming=True))
