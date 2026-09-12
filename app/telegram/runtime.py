@@ -12,6 +12,7 @@ from app.db.session import initialize_database
 from app.services.tenant import TenantService
 from app.telegram.central import register_central_handlers
 from app.telegram.central.admin import register_central_admin_handlers
+from app.telegram.central.order_tracking import install_order_tracking
 from app.telegram.representative.registry import registry
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     register_central_handlers(client)
     print("[telegram-runtime] central handlers registered", flush=True)
     register_central_admin_handlers(client)
+    install_order_tracking(client)
     print("[telegram-runtime] central admin handlers registered", flush=True)
     print("[telegram-runtime] starting central bot", flush=True)
     await client.start(bot_token=settings.central_bot_token)
