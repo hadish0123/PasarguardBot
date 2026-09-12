@@ -5,22 +5,35 @@ from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_users import SERVICE as USERS
 from app.services.user_wallet import SERVICE
+
 PREFIX=b"user:wallet:"
+
+
+def _amount(v:float)->str:
+    sign='+' if v>0 else ''
+    return f"{sign}{round(float(v)):,.0f} تومان"
+
+
 def register(client,tenant_id=None):
  async def callback(event):
   async with tenant_dispatch(tenant_id):
-   if not await allowed(event): return await event.answer("دسترسی به این بخش ندارید.",alert=True)
+   if not await allowed(event): return await event.answer("دسترسی به این بخش را ندارید.",alert=True)
    await event.answer(); await render_callback(event)
  client.add_event_handler(callback,events.CallbackQuery(func=lambda e:bool(e.data and e.data.startswith(PREFIX))))
+
+
 async def allowed(event):
  if not event.is_private or not get_tenant():return False
  user=await USERS.get_by_telegram_id(event.sender_id);return bool(user and not user.blocked)
-def _amount(v:float)->str:return f"{('+' if v>0 else '')}{v:,.2f}"
+
+
 async def render_wallet(uid:int):
  balance=await SERVICE.balance(uid);transactions=await SERVICE.transactions(uid,5)
- text=f"💳 **کیف پول من**\n\n💰 موجودی: **{balance:,.2f}**\n"
+ text=f"💳 **کیف پول من**\n\n💰 موجودی: **{round(float(balance)):,.0f} تومان**\n"
  text+="\n🧾 آخرین تراکنش‌ها:\n"+"\n".join(f"• {_amount(float(t.amount))} — {t.reason}" for t in transactions) if transactions else "\n🧾 هنوز تراکنشی ثبت نشده است."
  return text,[[Button.inline("🧾 تاریخچه کامل",PREFIX+b"history")],[Button.inline("🔄 بروزرسانی",PREFIX+b"show")],[Button.inline("🔙 فروشگاه",b"user:"+USER_HOME.encode())]]
+
+
 async def render_callback(event):
  action=event.data[len(PREFIX):].decode(errors="ignore")
  if action in ("","show"):
