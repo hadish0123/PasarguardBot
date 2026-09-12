@@ -38,6 +38,11 @@ def register(client, tenant_id=None):
     )
 
 
+def _money(value: float) -> str:
+    """Format every representative-sale amount as an exact Toman integer."""
+    return f"{round(float(value)):,.0f} تومان"
+
+
 def _status(value):
     return STATUS_LABELS.get(value, value)
 
@@ -51,13 +56,13 @@ async def _detail(order):
         f"📦 پلن: **{order.plan_name}**\n"
         f"💾 حجم: `{order.volume_gb:g} GB`\n"
         f"⏱ مدت: `{order.days}` روز\n"
-        f"💰 مبلغ نهایی: **{order.amount:,.2f}**\n"
+        f"💰 مبلغ نهایی: **{_money(order.amount)}**\n"
         f"📌 وضعیت سفارش: **{_status(order.status)}**"
     )
     if record:
         text += (
-            f"\n\n🧾 مبلغ پایه: **{record.subtotal:,.2f}**"
-            f"\n➖ تخفیف: **{record.discount_amount:,.2f}**"
+            f"\n\n🧾 مبلغ پایه: **{_money(record.subtotal)}**"
+            f"\n➖ تخفیف: **{_money(record.discount_amount)}**"
             f"\n🎟 کد: **{record.discount_code or '-'}**"
             f"\n💳 شناسه پرداخت: **{record.payment_reference or 'ثبت نشده'}**"
         )
@@ -72,6 +77,46 @@ async def _detail(order):
     return text
 
 
+def _delivery_messages(subscription) -> tuple[str, str] | None:
+    """Return separate subscription and config messages for a provisioned client."""
+    base = (subscription.subscription_url or "").strip().rstrip("/")
+    if not base:
+        return None
+    subscription_message = (
+        "🎉 **سرویس شما آماده شد!**\n\n"
+        f"📦 پلن: **{subscription.plan_name}**\n"
+        f"💾 حجم: **{subscription.volume_gb:g} GB**\n"
+        f"⏱ مدت: **{subscription.days} روز**\n\n"
+        "🔗 **ساب اصلی:**\n"
+        f"`{base}`"
+    )
+    formats = (
+        ("Xray", "xray"),
+        ("Clash Meta", "clash_meta"),
+        ("Clash", "clash"),
+        ("Sing-box", "sing_box"),
+        ("WireGuard", "wireguard"),
+        ("Outline", "outline"),
+    )
+    lines = ["📡 **کانفیگ‌های سرویس**", "", "لینک هر فرمت جداگانه:"]
+    for title, suffix in formats:
+        lines.append(f"• **{title}:** `{base}/{suffix}`")
+    config_message = "\n".join(lines)
+    return subscription_message, config_message
+
+
+async def _send_delivery(event, user_id: int, subscription) -> None:
+    messages = _delivery_messages(subscription)
+    if not messages:
+        return
+    subscription_message, config_message = messages
+    try:
+        await event.client.send_message(user_id, subscription_message)
+        await event.client.send_message(user_id, config_message)
+    except Exception:
+        pass
+
+
 async def render(status="all"):
     orders = await SERVICE.list(None if status == "all" else status, limit=30)
     title = FILTER_LABELS.get(status, "همه")
@@ -80,7 +125,7 @@ async def render(status="all"):
     else:
         lines = ["🛒 **فروش و سفارش‌ها**", f"فیلتر: **{title}**", ""]
         for order in orders:
-            lines.append(f"#{order.id} — {order.plan_name} — {order.amount:,.2f} — {_status(order.status)}")
+            lines.append(f"#{order.id} — {order.plan_name} — {_money(order.amount)} — {_status(order.status)}")
         text = "\n".join(lines)
     buttons = []
     buttons.append([
@@ -172,18 +217,7 @@ async def callback_handler(event):
         except Exception as exc:
             return await event.answer(f"تحویل ناموفق: {str(exc)[:180]}", alert=True)
         if subscription.status == "active":
-            try:
-                message = (
-                    f"🎉 **سرویس شما آماده شد!**\n\n"
-                    f"📦 پلن: **{subscription.plan_name}**\n"
-                    f"💾 حجم: **{subscription.volume_gb:g} GB**\n"
-                    f"⏱ مدت: **{subscription.days} روز**"
-                )
-                if subscription.subscription_url:
-                    message += f"\n\n🔗 لینک اشتراک:\n{subscription.subscription_url}"
-                await event.client.send_message(order.telegram_user_id, message)
-            except Exception:
-                pass
+            await _send_delivery(event, order.telegram_user_id, subscription)
         await event.answer("✅ فرآیند تحویل اجرا شد.")
         rows = [[Button.inline("🛒 جزئیات سفارش", PREFIX + f"view:{order_id}:{previous_filter}".encode())], [Button.inline("📋 لیست", PREFIX + f"filter:{previous_filter}".encode())]]
         await event.edit(await _detail(order), buttons=rows)
@@ -205,18 +239,7 @@ async def callback_handler(event):
         if status == "paid":
             subscription = await SUBSCRIPTIONS.get_by_order(order_id)
             if subscription and subscription.status == "active":
-                try:
-                    message = (
-                        f"🎉 **سرویس شما آماده شد!**\n\n"
-                        f"📦 پلن: **{subscription.plan_name}**\n"
-                        f"💾 حجم: **{subscription.volume_gb:g} GB**\n"
-                        f"⏱ مدت: **{subscription.days} روز**"
-                    )
-                    if subscription.subscription_url:
-                        message += f"\n\n🔗 لینک اشتراک:\n{subscription.subscription_url}"
-                    await event.client.send_message(order.telegram_user_id, message)
-                except Exception:
-                    pass
+                await _send_delivery(event, order.telegram_user_id, subscription)
         elif status == "cancelled":
             try:
                 await event.client.send_message(
