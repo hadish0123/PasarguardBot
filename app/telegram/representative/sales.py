@@ -31,11 +31,7 @@ def register(client, tenant_id: str | None = None) -> None:
                 _INPUTS.pop(key, None)
                 return await event.respond("❌ عملیات لغو شد.")
             try:
-                if mode == "currency":
-                    if not 1 <= len(value) <= 30:
-                        raise ValueError("واحد قیمت باید بین 1 تا 30 کاراکتر باشد.")
-                    await SERVICE.set("currency", value)
-                else:
+                if mode == "support":
                     username = value.lstrip("@").strip()
                     if username and (len(username) > 64 or not username.replace("_", "").isalnum()):
                         raise ValueError("نام کاربری تلگرام معتبر نیست.")
@@ -72,15 +68,14 @@ async def render():
         f"🛍 فروش: {on(data['sales_enabled'])}\n"
         f"💳 تأیید پرداخت: {on(data['require_payment_confirmation'])}\n"
         f"📦 سفارش معلق: {on(data['allow_pending_orders'])}\n"
-        f"💰 واحد قیمت: **{data['currency']}**\n"
+        "💰 واحد قیمت: **تومان**\n"
         f"🆘 پشتیبانی: **{support}**\n\n"
-        "تغییرات این صفحه روی Checkout و رفتار فروش اعمال می‌شوند."
+        "قیمت همه پلن‌ها و تراکنش‌های فروش به‌صورت عدد صحیح و دقیق بر حسب تومان ثبت و نمایش داده می‌شوند."
     )
     buttons = [
         [Button.inline(f"🛍 فروش {on(data['sales_enabled'])}", PREFIX + b"sales")],
         [Button.inline(f"💳 تأیید پرداخت {on(data['require_payment_confirmation'])}", PREFIX + b"payment")],
         [Button.inline(f"📦 سفارش معلق {on(data['allow_pending_orders'])}", PREFIX + b"pending")],
-        [Button.inline("💰 تغییر واحد قیمت", PREFIX + b"currency")],
         [Button.inline("🆘 تغییر پشتیبانی", PREFIX + b"support")],
         [Button.inline("📊 داشبورد", b"rep:" + REP_HOME.encode())],
     ]
@@ -99,12 +94,6 @@ async def handle(event):
         }
         field = mapping[action]
         await SERVICE.set(field, not current[field])
-    elif action == b"currency":
-        _INPUTS[key] = "currency"
-        return await event.edit(
-            "💰 **واحد قیمت جدید**\n\nمثلاً `تومان` یا `USD` را ارسال کنید.",
-            buttons=[[Button.inline("❌ لغو", PREFIX + b"cancel")]],
-        )
     elif action == b"support":
         _INPUTS[key] = "support"
         return await event.edit(
