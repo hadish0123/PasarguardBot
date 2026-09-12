@@ -19,6 +19,9 @@ async def admin_callback(event):
  data=event.data
  if not data or not data.startswith(PREFIX): return
  if not await _authorized(event): return await event.answer("دسترسی مدیریت ندارید.",alert=True)
+ if data.startswith(b"rep:guide:"):
+  from app.telegram.representative.guide import callback_handler
+  return await callback_handler(event)
  if data.startswith(b"rep:orders:"):
   from app.telegram.representative.orders import callback_handler
   return await callback_handler(event)
@@ -28,12 +31,7 @@ async def admin_callback(event):
  if action==REP_HOME: t,b=await _page("admin"); await event.edit(t,buttons=b); return await event.answer()
  if action=="guide":
   from app.telegram.representative.guide import render
-  t,b=await render(0); await event.edit(t,buttons=b); return await event.answer()
- if action.startswith("guide:"):
-  from app.telegram.representative.guide import render
-  try: page=int(action.split(":",1)[1])
-  except ValueError: page=0
-  t,b=await render(page); await event.edit(t,buttons=b); return await event.answer()
+  t,b=render(0); await event.edit(t,buttons=b); return await event.answer()
  pages={REP_PLANS:"plans",REP_USERS:"users",REP_ORDERS:"orders",REP_SERVICES:"services",REP_DISCOUNTS:"discounts",REP_SALES:"sales",REP_TEXTS:"texts",REP_LOGS:"logs",REP_LINKS:"links",REP_SETTINGS:"settings",REP_PANEL:"panel"}
  if action in pages: t,b=await _page(pages[action]); await event.edit(t,buttons=b); return await event.answer()
  if action==REP_SUPPORT:
