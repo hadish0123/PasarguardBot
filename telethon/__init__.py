@@ -151,6 +151,7 @@ class TelegramClient:
         self._stop = asyncio.Event()
         self._me: _Sender | None = None
         self._bot_message_ids: dict[int, set[int]] = {}
+        self._background_tasks: set[asyncio.Task] = set()
 
     def add_event_handler(self, callback, event):
         self._handlers.append((callback, event))
@@ -162,7 +163,8 @@ class TelegramClient:
         self._token = token
         self._base_url = f"https://api.telegram.org/bot{token}"
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35))
+            connector = aiohttp.TCPConnector(limit=100, limit_per_host=100, ttl_dns_cache=300, keepalive_timeout=30)
+            self._session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=35))
         me = await self._request("getMe")
         self._me = _Sender(id=int(me["id"]), first_name=me.get("first_name"), username=me.get("username"))
         return self
@@ -263,12 +265,18 @@ class TelegramClient:
                 updates = await self._request("getUpdates", {"offset": offset, "timeout": 25, "allowed_updates": ["message", "callback_query"]})
                 for update in updates or []:
                     offset = max(offset, int(update["update_id"]) + 1)
-                    await self._dispatch(update)
+                    self._dispatch_in_background(update)
+                await asyncio.sleep(0)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Telegram Bot API polling failed")
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
+
+    def _dispatch_in_background(self, update):
+        task = asyncio.create_task(self._dispatch(update), name="telegram-update-dispatch")
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _dispatch(self, update):
         is_callback = "callback_query" in update
@@ -277,7 +285,7 @@ class TelegramClient:
         if is_callback:
             async def acknowledge_quickly():
                 try:
-                    await asyncio.sleep(0.12)
+                    await asyncio.sleep(0.05)
                     await event.answer()
                 except asyncio.CancelledError:
                     raise
@@ -285,15 +293,20 @@ class TelegramClient:
                     logger.debug("Fast callback acknowledgement failed", exc_info=True)
             auto_ack = asyncio.create_task(acknowledge_quickly(), name="telegram-fast-callback-ack")
         try:
+            callbacks = []
             for callback, builder in list(self._handlers):
                 try:
                     if hasattr(builder, "matches") and not builder.matches(event):
                         continue
                     if isinstance(builder, events.NewMessage) and builder.pattern:
                         event.pattern_match = _PatternMatch(builder.pattern, event.raw_text)
-                    await callback(event)
+                    callbacks.append(callback)
                 except Exception:
-                    logger.exception("Telegram handler failed")
+                    logger.exception("Telegram handler match failed")
+            if callbacks:
+                await asyncio.gather(*(callback(event) for callback in callbacks), return_exceptions=False)
+        except Exception:
+            logger.exception("Telegram handler failed")
         finally:
             if auto_ack is not None and not auto_ack.done():
                 auto_ack.cancel()
@@ -304,6 +317,11 @@ class TelegramClient:
 
     async def disconnect(self):
         self._stop.set()
+        tasks = list(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if self._session and not self._session.closed:
             await self._session.close()
 
