@@ -7,6 +7,7 @@ from app.services.representative_users import SERVICE as USER_SERVICE
 from app.services.texts import SERVICE as TEXT_SERVICE
 from app.services.referrals import SERVICE as REFERRAL_SERVICE
 from app.services.representative_settings import SERVICE as SETTINGS
+from app.telegram.representative.force_join import ForceJoinError, channel_url, is_user_member, validate_channel_admin
 logger=logging.getLogger(__name__)
 def _token_fingerprint(token:str)->str:return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
 class RepresentativeRuntime:
@@ -38,26 +39,22 @@ class RepresentativeRuntime:
   from app.telegram.representative.referral import register as rf
   from app.telegram.representative.support import register as sp
   from app.telegram.representative.support_admin import register as spa
-  a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); sv(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id); h(self.client,self.tenant_id); co(self.client,self.tenant_id); n(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id); rf(self.client,self.tenant_id); sp(self.client,self.tenant_id); spa(self.client,self.tenant_id)
+  a(self.client,self.tenant_id); p(self.client,self.tenant_id); u(self.client,self.tenant_id); o(self.client,self.tenant_id); sv(self.client,self.tenant_id); d(self.client,self.tenant_id); s(self.client,self.tenant_id); t(self.client,self.tenant_id); l(self.client,self.tenant_id); k(self.client,self.tenant_id); r(self.client,self.tenant_id,self.bot_token); h(self.client,self.tenant_id); co(self.client,self.tenant_id); n(self.client,self.tenant_id); us(self.client,self.tenant_id); w(self.client,self.tenant_id); pr(self.client,self.tenant_id); du(self.client,self.tenant_id); tr(self.client,self.tenant_id); rf(self.client,self.tenant_id); sp(self.client,self.tenant_id); spa(self.client,self.tenant_id)
  async def _force_join_required(self,event)->bool:
   if not event.is_private or await self.dashboard.is_owner(event.sender_id): return False
   channel_id=(await SETTINGS.snapshot()).get("force_join_channel_id","").strip()
   if not channel_id:return False
   try:
-   permissions=await self.client.get_permissions(int(channel_id),event.sender_id)
-   joined=bool(getattr(permissions,"is_member",False) or getattr(permissions,"is_admin",False) or getattr(permissions,"is_creator",False))
+   return not await is_user_member(self.bot_token,int(channel_id),event.sender_id)
   except Exception:
-   joined=False
-  if joined:return False
-  return True
+   return True
  async def _force_join_message(self,event):
   async with tenant_dispatch(self.tenant_id):
    if not await self._force_join_required(event):return
    channel_id=(await SETTINGS.snapshot()).get("force_join_channel_id","").strip()
    url=None
    try:
-    entity=await self.client.get_entity(int(channel_id)); username=getattr(entity,"username",None)
-    if username:url=f"https://t.me/{username}"
+    chat=await validate_channel_admin(self.bot_token,int(channel_id)); url=channel_url(chat)
    except Exception:pass
    buttons=[[Button.url("📢 عضویت در کانال",url)]] if url else []
    buttons.append([Button.inline("✅ بررسی عضویت",b"forcejoin:check")])
