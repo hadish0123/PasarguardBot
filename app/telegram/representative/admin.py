@@ -12,7 +12,7 @@ def register(client,tenant_id=None):
  client.add_event_handler(show_admin,events.NewMessage(pattern=r"^/admin$")); client.add_event_handler(callback,events.CallbackQuery())
 async def _authorized(event): return bool(event.is_private and get_tenant() and await SERVICE.is_owner(event.sender_id))
 async def dashboard_text():
- d=await SERVICE.snapshot(); bot=f"@{d['bot_username']}" if d['bot_username'] else "در حال شناسایی"; return f"📊 **داشبورد نماینده**\n\n🏷 برند: **{d['brand']}**\n🤖 ربات: **{bot}**\n🟢 وضعیت: **فعال**\n\nاز منوی زیر مدیریت فروشگاه و سرویس‌های نمایندگی را انجام دهید."
+ d=await SERVICE.snapshot(); bot=f"@{d['bot_username']}" if d['bot_username'] else "در حال شناسایی"; return f"📊 **داشبورد نماینده**\n\n🏷 برند: **{d['brand']}**\n🤖 ربات: **{bot}\n🟢 وضعیت: **فعال**\n\nاز منوی زیر مدیریت فروشگاه و سرویس‌های نمایندگی را انجام دهید."
 async def show_admin(event):
  if await _authorized(event): await event.respond(await dashboard_text(),buttons=ADMIN_MENU)
 async def admin_callback(event):
@@ -23,9 +23,13 @@ async def admin_callback(event):
  if data.startswith(child): return
  action=data[len(PREFIX):].decode(errors="ignore")
  if action==REP_HOME: t,b=await _page("admin"); await event.edit(t,buttons=b); return await event.answer()
+ if action==REP_ORDERS:
+  from app.telegram.representative.orders import render
+  t,b=await render("all")
+  await event.edit(t,buttons=b)
+  return await event.answer()
  pages={REP_PLANS:"plans",REP_USERS:"users",REP_ORDERS:"orders",REP_SERVICES:"services",REP_DISCOUNTS:"discounts",REP_SALES:"sales",REP_TEXTS:"texts",REP_LOGS:"logs",REP_LINKS:"links",REP_SETTINGS:"settings",REP_PANEL:"panel"}
- if action in pages:
-  t,b=await _page(pages[action]); await event.edit(t,buttons=b); return await event.answer()
+ if action in pages: t,b=await _page(pages[action]); await event.edit(t,buttons=b); return await event.answer()
  if action==REP_SUPPORT:
   from app.telegram.representative.support_admin import render
   await render(event); return await event.answer()
