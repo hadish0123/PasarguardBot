@@ -18,6 +18,17 @@ class ProvisionedUser:
 
 
 @dataclass(frozen=True)
+class PasarguardUserDetails:
+    service_id: str
+    username: str | None
+    status: str | None
+    used_traffic: int | None
+    data_limit: int | None
+    expire: datetime | None
+    subscription_url: str | None
+
+
+@dataclass(frozen=True)
 class PanelProbe:
     client_count: int
     test_user: ProvisionedUser
@@ -53,6 +64,24 @@ class PasarguardClient:
         if not subscription:
             return None
         return urljoin(f"{self.base_url}/", subscription)
+
+    @staticmethod
+    def _parse_expire(value: object) -> datetime | None:
+        if value in (None, "", 0, "0"):
+            return None
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(float(value), tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                return None
+        raw = str(value).strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
@@ -118,6 +147,50 @@ class PasarguardClient:
     async def _first_group_id(self) -> int | None:
         group_ids = await self._group_ids()
         return group_ids[0] if group_ids else None
+
+    async def get_user_by_id(self, user_id: str | int) -> PasarguardUserDetails:
+        """Read live user/service state using PasarGuard's ID-based API."""
+        raw_id = str(user_id).strip()
+        if not raw_id:
+            raise ValueError("شناسه سرویس پاسارگارد نامعتبر است.")
+
+        response = await self._request("GET", f"/api/user/by-id/{raw_id}")
+        if response.status_code == 404:
+            # PasarGuard v5 announces /api/user/{id} as the future ID endpoint.
+            response = await self._request("GET", f"/api/user/{raw_id}")
+        if not response.is_success:
+            detail = response.text.strip()[:500]
+            raise ExternalServiceError(f"دریافت اطلاعات سرویس پاسارگارد ناموفق بود (HTTP {response.status_code}). {detail}")
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ExternalServiceError("پاسخ اطلاعات سرویس پاسارگارد JSON معتبر نیست.") from exc
+        if not isinstance(data, dict):
+            raise ExternalServiceError("ساختار اطلاعات سرویس پاسارگارد نامعتبر است.")
+
+        service_id = data.get("id") or data.get("user_id") or raw_id
+        used = data.get("used_traffic")
+        limit = data.get("data_limit")
+        try:
+            used_traffic = int(used) if used is not None else None
+        except (TypeError, ValueError):
+            used_traffic = None
+        try:
+            data_limit = int(limit) if limit is not None else None
+        except (TypeError, ValueError):
+            data_limit = None
+
+        return PasarguardUserDetails(
+            service_id=str(service_id),
+            username=str(data["username"]) if data.get("username") is not None else None,
+            status=str(data["status"]) if data.get("status") is not None else None,
+            used_traffic=used_traffic,
+            data_limit=data_limit,
+            expire=self._parse_expire(data.get("expire")),
+            subscription_url=self._absolute_subscription_url(
+                data.get("subscription_url") or data.get("subscriptionUrl")
+            ),
+        )
 
     async def create_test_user(self) -> ProvisionedUser:
         username = f"pasarguard_test_{int(time.time())}_{uuid.uuid4().hex[:6]}"
