@@ -31,7 +31,6 @@ async def _safe_edit_message(self, entity, message_id: int, text: str, *, button
         message = str(exc).lower()
         if "can't parse entities" not in message and "parse entities" not in message:
             raise
-
         retry_kwargs = dict(kwargs)
         retry_kwargs["parse_mode"] = "HTML"
         retry_text = html.escape(str(text), quote=False)
@@ -47,6 +46,35 @@ async def _safe_edit_message(self, entity, message_id: int, text: str, *, button
 
 
 TelegramClient.edit_message = _safe_edit_message
+
+
+async def _start_representative(tenant) -> bool:
+    try:
+        await registry.start(tenant.id, tenant.bot_token)
+        logger.info("[telegram-runtime] representative runtime restored: %s", tenant.id)
+        return True
+    except Exception:
+        logger.exception("failed to restore representative runtime: %s", tenant.id)
+        return False
+
+
+async def _restore_representative_runtimes(tenants) -> tuple[int, int]:
+    """Restore bots concurrently with a bounded fan-out.
+
+    A single invalid/dead bot must never block the rest of the fleet. The
+    semaphore protects Telegram/API and local resources while still allowing
+    a large fleet to recover much faster than sequential startup.
+    """
+    if not tenants:
+        return 0, 0
+    semaphore = asyncio.Semaphore(20)
+
+    async def worker(tenant):
+        async with semaphore:
+            return await _start_representative(tenant)
+
+    results = await asyncio.gather(*(worker(tenant) for tenant in tenants), return_exceptions=False)
+    return sum(1 for ok in results if ok), sum(1 for ok in results if not ok)
 
 
 async def run(stop_event: asyncio.Event | None = None) -> None:
@@ -77,13 +105,11 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     tenant_service = TenantService()
     tenants = await tenant_service.list_runtime_tenants(settings.central_bot_token)
     print(f"[telegram-runtime] runtime tenants: {len(tenants)}", flush=True)
-    for tenant in tenants:
-        try:
-            await registry.start(tenant.id, tenant.bot_token)
-            print(f"[telegram-runtime] representative runtime restored: {tenant.id}", flush=True)
-        except Exception:
-            logger.exception("failed to restore representative runtime: %s", tenant.id)
-            print(f"[telegram-runtime] representative restore failed: {tenant.id}", flush=True)
+    restored, failed = await _restore_representative_runtimes(tenants)
+    print(
+        f"[telegram-runtime] representative runtimes restored: {restored}; failed: {failed}",
+        flush=True,
+    )
 
     print("[telegram-runtime] entering update loop", flush=True)
     if stop_event is None:
@@ -102,8 +128,13 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
 
 async def _stop_representative_runtimes() -> None:
     tenants = await TenantService().list_runtime_tenants(settings.central_bot_token)
-    for tenant in tenants:
-        try:
-            await registry.stop(tenant.id)
-        except Exception:
-            logger.exception("failed to stop representative runtime: %s", tenant.id)
+    semaphore = asyncio.Semaphore(20)
+
+    async def worker(tenant):
+        async with semaphore:
+            try:
+                await registry.stop(tenant.id)
+            except Exception:
+                logger.exception("failed to stop representative runtime: %s", tenant.id)
+
+    await asyncio.gather(*(worker(tenant) for tenant in tenants))
