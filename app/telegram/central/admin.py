@@ -57,7 +57,7 @@ async def admin_text(event):
             if tenant is None:
                 await event.respond("❌ هیچ ربات نمایندگی با این شناسه پیدا نشد.", buttons=dashboard_buttons())
                 return
-            await event.respond(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status))
+            await event.respond(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status, tenant.bot_id))
         except Exception as exc:
             print(f"[central-admin] BOT ID LOOKUP ERROR: {type(exc).__name__}: {exc}", flush=True)
             await event.respond("❌ بررسی شناسه ربات انجام نشد.", buttons=dashboard_buttons())
@@ -75,7 +75,7 @@ async def admin_text(event):
                 "✅ **ادمین پنل با موفقیت تغییر کرد.**\n\n"
                 f"👤 ادمین جدید: `{tenant.owner_id}`\n\n"
                 "از این پس پنل مدیریت ربات برای این شناسه در دسترس است.",
-                buttons=tenant_buttons(tenant.id, tenant.status),
+                buttons=tenant_buttons(tenant.id, tenant.status, tenant.bot_id),
             )
             try:
                 await event.client.send_message(tenant.owner_id, "🛠 شما به عنوان ادمین پنل مدیریت ربات نمایندگی تعیین شدید.")
@@ -144,7 +144,7 @@ async def admin_callback(event):
                 return
             tenant = await SERVICE.get_tenant_by_bot_id(record.bot_id) if record.bot_id else None
             if tenant:
-                await event.edit(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status))
+                await event.edit(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status, tenant.bot_id))
             else:
                 await event.edit(detail_text(record), buttons=detail_buttons(record.id, record.status))
             return
@@ -154,7 +154,7 @@ async def admin_callback(event):
             if tenant is None:
                 await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
                 return
-            await event.edit(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status))
+            await event.edit(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status, tenant.bot_id))
             return
         if data.startswith(PREFIX + b"disable:"):
             tenant_id = data[len(PREFIX) + len(b"disable:"):].decode("utf-8")
@@ -163,10 +163,10 @@ async def admin_callback(event):
                 await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
                 return
             await registry.stop(tenant.id)
-            tenant = await SERVICE.set_tenant_status(tenant.id, TenantStatus.SUSPENDED)
+            tenant = await SERVICE.set_tenant_status(tenant_id, TenantStatus.SUSPENDED)
             await event.edit(
                 "⛔ **ربات غیرفعال شد**\n\n" + tenant_detail_text(tenant, False),
-                buttons=tenant_buttons(tenant.id, tenant.status),
+                buttons=tenant_buttons(tenant.id, tenant.status, tenant.bot_id),
             )
             try:
                 await event.client.send_message(tenant.owner_id, "⛔ ربات نمایندگی شما توسط مدیریت مرکزی غیرفعال شد.")
@@ -179,12 +179,12 @@ async def admin_callback(event):
             if tenant is None:
                 await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
                 return
-            token = await SERVICE.get_tenant_bot_token(tenant.id)
+            token = await SERVICE.get_tenant_bot_token(tenant_id)
             await registry.start(tenant.id, token)
-            tenant = await SERVICE.set_tenant_status(tenant.id, TenantStatus.ACTIVE)
+            tenant = await SERVICE.set_tenant_status(tenant_id, TenantStatus.ACTIVE)
             await event.edit(
                 "✅ **ربات فعال شد**\n\n" + tenant_detail_text(tenant, True),
-                buttons=tenant_buttons(tenant.id, tenant.status),
+                buttons=tenant_buttons(tenant.id, tenant.status, tenant.bot_id),
             )
             try:
                 await event.client.send_message(tenant.owner_id, "✅ ربات نمایندگی شما توسط مدیریت مرکزی دوباره فعال شد.")
@@ -204,7 +204,7 @@ async def admin_callback(event):
                 "شناسه عددی تلگرام ادمین جدید را ارسال کنید.\n\n"
                 f"ادمین فعلی: `{tenant.owner_id}`\n\n"
                 "مثال: `123456789`",
-                buttons=[[Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant.id}".encode())]],
+                buttons=[[Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant.bot_id}".encode())]],
             )
             return
         if data.startswith(PREFIX + b"delete_confirm:"):
@@ -221,8 +221,8 @@ async def admin_callback(event):
                 "اطلاعات فروش و سوابق دیتابیس به صورت خودکار پاک نمی‌شوند.\n\n"
                 "آیا مطمئن هستید؟",
                 buttons=[
-                    [Button.inline("🗑 بله، حذف کن", PREFIX + f"delete:{tenant.id}".encode())],
-                    [Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant.id}".encode())],
+                    [Button.inline("🗑 بله، حذف کن", PREFIX + f"delete:{tenant.bot_id}".encode())],
+                    [Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant.bot_id}".encode())],
                 ],
             )
             return
@@ -235,7 +235,7 @@ async def admin_callback(event):
             owner_id = tenant.owner_id
             bot_username = tenant.bot_username
             await registry.stop(tenant.id)
-            await SERVICE.delete_tenant(tenant.id)
+            await SERVICE.delete_tenant(tenant_id)
             await event.edit(
                 "🗑 **ربات با موفقیت حذف شد**\n\n"
                 f"🤖 @{bot_username or '—'}\n"
@@ -383,7 +383,7 @@ async def bots_buttons():
     for tenant in tenants:
         state = "🟢" if tenant.status == TenantStatus.ACTIVE.value else "⛔"
         label = f"{state} {tenant.bot_username or tenant.bot_id}"
-        rows.append([Button.inline(label[:60], PREFIX + f"tenant:{tenant.id}".encode())])
+        rows.append([Button.inline(label[:60], PREFIX + f"tenant:{tenant.bot_id}".encode())])
     rows.append([Button.inline("🔎 ورود با شناسه ربات", PREFIX + b"lookup")])
     rows.append([Button.inline("🔙 داشبورد", PREFIX + b"home")])
     return rows
@@ -404,13 +404,14 @@ def tenant_detail_text(tenant, runtime_running: bool) -> str:
     )
 
 
-def tenant_buttons(tenant_id: str, status: str):
+def tenant_buttons(tenant_id: str, status: str, bot_id: int | None = None):
+    ref = str(bot_id) if bot_id is not None else str(tenant_id)
     action = "disable" if status == TenantStatus.ACTIVE.value else "enable"
     label = "⛔ غیرفعال کردن ربات" if action == "disable" else "🟢 فعال کردن ربات"
     return [
-        [Button.inline(label, PREFIX + f"{action}:{tenant_id}".encode())],
-        [Button.inline("👤 تغییر ادمین پنل", PREFIX + f"owner:{tenant_id}".encode())],
-        [Button.inline("🗑 حذف ربات", PREFIX + f"delete_confirm:{tenant_id}".encode())],
+        [Button.inline(label, PREFIX + f"{action}:{ref}".encode())],
+        [Button.inline("👤 تغییر ادمین پنل", PREFIX + f"owner:{ref}".encode())],
+        [Button.inline("🗑 حذف ربات", PREFIX + f"delete_confirm:{ref}".encode())],
         [Button.inline("🔙 لیست ربات‌ها", PREFIX + b"bots")],
         [Button.inline("🏠 داشبورد", PREFIX + b"home")],
     ]
