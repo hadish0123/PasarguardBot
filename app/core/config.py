@@ -11,7 +11,12 @@ class Settings:
     central_bot_token: str = os.getenv("BOT_TOKEN", "")
     database_url: str = os.getenv("SQLALCHEMY_DATABASE_URL") or os.getenv("DATABASE_URL", "")
     redis_url: str = os.getenv("REDIS_URL", "")
-    fastapi_port: int = int(os.getenv("FASTAPI_PORT", os.getenv("FAST_API_PORT", "8080")))
+    fastapi_port: int = int(os.getenv("PORT", os.getenv("FASTAPI_PORT", os.getenv("FAST_API_PORT", "8080"))))
+    web_admin_enabled: bool = os.getenv("WEB_ADMIN_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    web_admin_username: str = os.getenv("WEB_ADMIN_USERNAME", "admin").strip() or "admin"
+    web_admin_password: str = os.getenv("WEB_ADMIN_PASSWORD", "")
+    web_admin_session_secret: str = os.getenv("WEB_ADMIN_SESSION_SECRET", "")
+    secret_key: str = os.getenv("SECRET_KEY", "")
     admin_ids: tuple[int, ...] = tuple(
         int(x.strip()) for x in os.getenv("ADMIN_ID", "").split(",") if x.strip().isdigit()
     )
