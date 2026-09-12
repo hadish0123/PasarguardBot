@@ -14,15 +14,19 @@ from app.services.representative_dashboard import RepresentativeDashboardService
 PREFIX = b"user:order:"
 STATE: dict[tuple[str, int], dict] = {}
 
+
 def key(t, u): return (t, int(u))
+
 
 async def allowed(event):
     if not event.is_private or not get_tenant(): return False
     u = await USER_SERVICE.get_by_telegram_id(event.sender_id)
     return bool(u and not u.blocked)
 
-def _money(value: float, currency: str) -> str:
-    return f"{value:,.0f} {currency}"
+
+def _money(value: float) -> str:
+    return f"{round(float(value)):,.0f} تومان"
+
 
 async def render(event, plan_id):
     sales = await SALES_SERVICE.snapshot()
@@ -30,24 +34,26 @@ async def render(event, plan_id):
     plan = next((p for p in await PlanService().list() if p.id == plan_id and p.enabled), None)
     if not plan: return await event.answer("این پلن دیگر فعال نیست.", alert=True)
     s = STATE.setdefault(key(get_tenant(), event.sender_id), {})
-    code = s.get("code"); subtotal = float(plan.price); discount = 0.0
+    code = s.get("code"); subtotal = round(float(plan.price)); discount = 0.0
     if code:
         try: _, discount, total = await DISCOUNT_SERVICE.calculate(code, subtotal)
         except (LookupError, ValueError) as exc:
             s.pop("code", None); return await event.answer(str(exc), alert=True)
     else: total = subtotal
-    s["plan_id"] = plan.id; currency = sales.get("currency", "تومان")
-    text = f"🧾 **تأیید خرید**\n\n📦 **{plan.name}**\n💾 {plan.volume_gb:g} GB · {plan.days} روز\n💰 مبلغ پایه: **{_money(subtotal, currency)}**"
-    if code: text += f"\n🎟 **{code}** · ➖ **{_money(discount, currency)}**"
-    text += f"\n\n💳 مبلغ نهایی: **{_money(total, currency)}**"
+    s["plan_id"] = plan.id
+    text = f"🧾 **تأیید خرید**\n\n📦 **{plan.name}**\n💾 {plan.volume_gb:g} GB · {plan.days} روز\n💰 مبلغ پایه: **{_money(subtotal)}**"
+    if code: text += f"\n🎟 **{code}** · ➖ **{_money(discount)}**"
+    text += f"\n\n💳 مبلغ نهایی: **{_money(total)}**"
     await event.edit(text, buttons=[[Button.inline("💳 ادامه و دریافت شماره کارت", PREFIX+b"pay")],[Button.inline("🎟 کد تخفیف", PREFIX+b"discount"),Button.inline("🗑 حذف تخفیف", PREFIX+b"clear")],[Button.inline("🔙 پلن‌ها",b"user:buy"),Button.inline("❌ لغو",b"user:home")]])
 
+
 async def _payment_screen(event, order):
-    sales = await SALES_SERVICE.snapshot(); settings = await REP_SETTINGS.snapshot(); currency = sales.get("currency", "تومان")
+    settings = await REP_SETTINGS.snapshot()
     card = settings.get("payment_card_number", "").strip(); holder = settings.get("payment_card_holder", "").strip()
     if not card or not holder:
         return await event.edit("⚠️ **پرداخت این فروشگاه هنوز تنظیم نشده است.**\n\nمدیر فروشگاه باید شماره کارت و نام صاحب کارت را در «تنظیمات نماینده» ثبت کند.", buttons=[[Button.inline("🔙 پلن‌ها",b"user:buy")],[Button.inline("🏪 فروشگاه",b"user:home")]])
-    await event.edit(f"💳 **پرداخت سفارش #{order.id}**\n\n📦 پلن: **{order.plan_name}**\n💰 مبلغ قابل پرداخت: **{_money(order.amount,currency)}**\n\n🏦 شماره کارت:\n`{card}`\n👤 به نام: **{holder}**\n\nپس از واریز، روی «پرداخت را انجام دادم» بزنید و سپس تصویر رسید یا کد پیگیری را ارسال کنید.", buttons=[[Button.inline("✅ پرداخت را انجام دادم",PREFIX+b"submitted")],[Button.inline("❌ لغو سفارش",PREFIX+b"cancel")]])
+    await event.edit(f"💳 **پرداخت سفارش #{order.id}**\n\n📦 پلن: **{order.plan_name}**\n💰 مبلغ قابل پرداخت: **{_money(order.amount)}**\n\n🏦 شماره کارت:\n`{card}`\n👤 به نام: **{holder}**\n\nپس از واریز، روی «پرداخت را انجام دادم» بزنید و سپس تصویر رسید یا کد پیگیری را ارسال کنید.", buttons=[[Button.inline("✅ پرداخت را انجام دادم",PREFIX+b"submitted")],[Button.inline("❌ لغو سفارش",PREFIX+b"cancel")]])
+
 
 async def callback(event, tenant_id):
     async with tenant_dispatch(tenant_id):
@@ -96,16 +102,18 @@ async def callback(event, tenant_id):
             s.pop("awaiting_discount",None); return await render(event,int(s["plan_id"])) if s.get("plan_id") else await event.answer("جلسه خرید منقضی شده است.",alert=True)
         return await event.answer("گزینه نامعتبر است.",alert=True)
 
+
 async def _notify_owner(event, order, receipt_label, photo_file_id=None):
     try:
         owner_id=int((await RepresentativeDashboardService().snapshot())["owner_id"])
-        caption=(f"🔔 رسید پرداخت جدید\n\n🧾 سفارش: #{order.id}\n👤 کاربر: {order.telegram_user_id}\n📦 پلن: {order.plan_name}\n💰 مبلغ: {order.amount:,.0f} تومان\n📎 {receipt_label}\n\nاز بخش «🛒 فروش و سفارش‌ها» پرداخت را تأیید یا لغو کنید.")
+        caption=(f"🔔 رسید پرداخت جدید\n\n🧾 سفارش: #{order.id}\n👤 کاربر: {order.telegram_user_id}\n📦 پلن: {order.plan_name}\n💰 مبلغ: {_money(order.amount)}\n📎 {receipt_label}\n\nاز بخش «🛒 فروش و سفارش‌ها» پرداخت را تأیید یا لغو کنید.")
         if photo_file_id:
             await event.client._request("sendPhoto", {"chat_id": owner_id, "photo": photo_file_id, "caption": caption})
         else:
             await event.client.send_message(owner_id, caption)
     except Exception:
         pass
+
 
 async def incoming(event, tenant_id):
     async with tenant_dispatch(tenant_id):
@@ -134,7 +142,8 @@ async def incoming(event, tenant_id):
                 order=await ORDER_SERVICE.get(order_id); await _notify_owner(event,order,receipt_label,photo_file_id)
             except (LookupError,ValueError) as exc: return await event.respond(f"❌ {exc}")
             STATE.pop(key(tenant_id,event.sender_id),None)
-            return await event.respond(f"✅ رسید سفارش **#{order_id}** دریافت شد.\n\n🕐 وضعیت: **در انتظار تأیید مدیریت**\nپس از تأیید، سرویس به‌صورت خودکار از پاسارگاد ساخته می‌شود و لینک اشتراک برای شما ارسال خواهد شد.",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
+            return await event.respond(f"✅ رسید سفارش **#{order_id}** دریافت شد.\n\n🕐 وضعیت: **در انتظار تأیید مدیریت**\nپس از تأیید، سرویس به‌صورت خودکار از پاسارگارد ساخته می‌شود و لینک اشتراک برای شما ارسال خواهد شد.",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
+
 
 def register(client,tenant_id):
     async def cb(event): await callback(event,tenant_id)
