@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
 
 from telethon import TelegramClient, events
 
@@ -9,6 +11,17 @@ from app.services.representative_dashboard import RepresentativeDashboardService
 from app.services.representative_users import SERVICE as USER_SERVICE
 from app.services.texts import SERVICE as TEXT_SERVICE
 from app.services.referrals import SERVICE as REFERRAL_SERVICE
+from app.services.tenant import TenantService
+
+logger = logging.getLogger(__name__)
+
+
+def _token_fingerprint(token: str) -> str:
+    """Return safe token identifier for logging."""
+    if not token:
+        return "none"
+    h = hashlib.sha256(token.encode()).hexdigest()[:8]
+    return f"{h}...{len(token)}"
 
 
 class RepresentativeRuntime:
@@ -84,23 +97,72 @@ class RepresentativeRuntime:
             await event.respond(values["welcome"], buttons=await customer_menu(values))
 
     async def start(self):
+        """Start client connection and register handlers. Does NOT start polling."""
         if self.is_running:
             return
         self.register()
         try:
             await self.client.start(bot_token=self.bot_token)
-            self._polling_task = asyncio.create_task(
-                self.client.run_until_disconnected(),
-                name=f"representative-poll-{self.tenant_id}",
-            )
             self.is_running = True
-        except Exception:
+            logger.info(
+                "CLIENT_CONNECTED: tenant_id=%s token_fingerprint=%s",
+                self.tenant_id, _token_fingerprint(self.bot_token)
+            )
+        except Exception as exc:
             await self.client.disconnect()
-            self._polling_task = None
             self.is_running = False
+            logger.exception("Failed to connect client for tenant %s: %s", self.tenant_id, exc)
             raise
 
+    async def _run_polling(self):
+        """Poll Telegram for updates. Called only if this runtime owns polling for its token."""
+        fingerprint = _token_fingerprint(self.bot_token)
+        logger.info(
+            "POLLING_STARTED: tenant_id=%s token_fingerprint=%s",
+            self.tenant_id, fingerprint
+        )
+        try:
+            await self.client.run_until_disconnected()
+        except asyncio.CancelledError:
+            logger.info(
+                "POLLING_CANCELLED: tenant_id=%s token_fingerprint=%s",
+                self.tenant_id, fingerprint
+            )
+            raise
+        except RuntimeError as exc:
+            if "409" in str(exc) or "Conflict" in str(exc):
+                logger.critical(
+                    "POLLING_409_CONFLICT: tenant_id=%s token_fingerprint=%s msg=%s",
+                    self.tenant_id, fingerprint, str(exc)
+                )
+                try:
+                    await TenantService().fail(self.tenant_id)
+                    logger.info(
+                        "TENANT_MARKED_FAILED: tenant_id=%s reason=polling_conflict",
+                        self.tenant_id
+                    )
+                except Exception:
+                    logger.exception("Failed to mark tenant %s as failed", self.tenant_id)
+                raise
+            logger.exception(
+                "POLLING_ERROR: tenant_id=%s token_fingerprint=%s",
+                self.tenant_id, fingerprint
+            )
+            raise
+        except Exception as exc:
+            logger.exception(
+                "POLLING_ERROR: tenant_id=%s token_fingerprint=%s",
+                self.tenant_id, fingerprint
+            )
+            raise
+        finally:
+            logger.info(
+                "POLLING_STOPPED: tenant_id=%s token_fingerprint=%s",
+                self.tenant_id, fingerprint
+            )
+
     async def stop(self):
+        """Stop polling task and disconnect client."""
         task = self._polling_task
         self._polling_task = None
         self.is_running = False
@@ -111,3 +173,7 @@ class RepresentativeRuntime:
             except asyncio.CancelledError:
                 pass
         await self.client.disconnect()
+        logger.info(
+            "CLIENT_DISCONNECTED: tenant_id=%s token_fingerprint=%s",
+            self.tenant_id, _token_fingerprint(self.bot_token)
+        )

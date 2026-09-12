@@ -80,17 +80,52 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
             print(f"[telegram-runtime] representative restore failed: {tenant.id}", flush=True)
 
     print("[telegram-runtime] entering update loop", flush=True)
+    
+    # Spawn polling tasks for central and all representative runtimes that own their tokens
+    polling_tasks = []
+    
+    # Central bot polling
+    central_polling = asyncio.create_task(
+        client.run_until_disconnected(),
+        name="central-polling"
+    )
+    polling_tasks.append(central_polling)
+    
+    # Representative polling (only for polling owners)
+    for tenant in tenants:
+        runtime = registry.get(tenant.id)
+        if runtime and registry.is_polling_owner(tenant.id):
+            task = asyncio.create_task(
+                runtime._run_polling(),
+                name=f"representative-polling-{tenant.id}"
+            )
+            polling_tasks.append(task)
+    
     if stop_event is None:
         try:
-            await client.run_until_disconnected()
+            # Wait for all polling tasks; if any fails, propagate
+            _, pending = await asyncio.wait(polling_tasks, return_when=asyncio.FIRST_EXCEPTION)
+            for task in polling_tasks:
+                if task.done() and task.exception():
+                    raise task.exception()
+        except asyncio.CancelledError:
+            pass
         finally:
             await _stop_representative_runtimes()
         return
 
     try:
+        # Wait for stop event while polling runs in background
         await stop_event.wait()
     finally:
         await client.disconnect()
+        for task in polling_tasks:
+            if not task.done():
+                task.cancel()
+        try:
+            await asyncio.gather(*polling_tasks, return_exceptions=True)
+        except Exception:
+            pass
         await _stop_representative_runtimes()
 
 
