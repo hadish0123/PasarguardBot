@@ -30,6 +30,12 @@ async def _safe_edit_message(self, entity, message_id: int, text: str, *, button
         return await _original_edit_message(self, entity, message_id, text, buttons=buttons, **kwargs)
     except RuntimeError as exc:
         message = str(exc).lower()
+        # Telegram raises MessageNotModifiedError when the requested content
+        # and markup are already identical. This is a successful no-op from
+        # the bot user's perspective and must never surface as a UI failure.
+        if "message is not modified" in message:
+            logger.debug("Telegram edit skipped: message is not modified")
+            return None
         if "can't parse entities" not in message and "parse entities" not in message:
             raise
         retry_kwargs = dict(kwargs)
