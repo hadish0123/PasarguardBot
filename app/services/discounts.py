@@ -62,8 +62,8 @@ class DiscountService:
         if amount < 0:
             raise ValueError("مبلغ نامعتبر است.")
         item = await self.validate(code)
-        discount = round(amount * float(item.percent) / 100, 2)
-        return item, discount, max(0.0, round(amount - discount, 2))
+        discount = round(amount * float(item.percent) / 100)
+        return item, discount, max(0.0, round(amount - discount))
 
     async def redeem(self, discount_id: int):
         """Atomically reserve one usage for a checkout.
