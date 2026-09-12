@@ -53,7 +53,7 @@ class OrderService:
   if not reference or len(reference)>190: raise ValueError("شناسه پرداخت نامعتبر است.")
   if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
   async with SessionFactory() as session:
-   order=await session.scalar(select(Order).where(Order.id==order_id,Order.tenant_id==require_tenant()))
+   order=await session.scalar(select(Order).where(Order.id==order_id,Order.tenant_id==require_tenant()).with_for_update())
    if order is None: raise LookupError("سفارش پیدا نشد.")
    if order.status!="pending": raise ValueError("این سفارش دیگر قابل پرداخت نیست.")
    record=await session.scalar(select(CheckoutRecord).where(CheckoutRecord.tenant_id==order.tenant_id,CheckoutRecord.order_id==order.id))
@@ -65,7 +65,10 @@ class OrderService:
   if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
   tenant_id=require_tenant(); provision_after=False; revoke_after=False; wallet_credit=0.0; wallet_user=0
   async with SessionFactory() as session:
-   order=await session.scalar(select(Order).where(Order.id==order_id,Order.tenant_id==tenant_id))
+   # Serialize status transitions for the same order. This prevents the
+   # MySQL/InnoDB "Record has changed since last read" race seen when two
+   # admin callbacks try to update the same order concurrently.
+   order=await session.scalar(select(Order).where(Order.id==order_id,Order.tenant_id==tenant_id).with_for_update())
    if order is None: raise LookupError("order not found")
    record=await session.scalar(select(CheckoutRecord).where(CheckoutRecord.tenant_id==tenant_id,CheckoutRecord.order_id==order.id)); redemption=await session.scalar(select(DiscountRedemption).where(DiscountRedemption.tenant_id==tenant_id,DiscountRedemption.order_id==order.id)); old=order.status
    if old==status:return order
