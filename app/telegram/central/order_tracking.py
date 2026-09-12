@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from app.services.pasarguard_provisioning import PasarguardProvisioningService
 SERVICE = CentralAdminService()
 PREFIX = b"central:admin:order:"
 _AWAITING_TRACKING: set[int] = set()
+_TRACKING_RE = re.compile(r"^PG-[A-Z0-9]{3,24}$", re.IGNORECASE)
 
 
 def install_order_tracking(client) -> None:
@@ -51,17 +53,39 @@ def _dt(value) -> str:
 
 
 async def _find_tracking(code: str):
+    """Resolve a PG tracking code to the relevant order.
+
+    Older installations generated PG codes on representative registrations, not
+    on orders themselves. Keep those codes valid for central order tracking by
+    resolving the latest order belonging to that representative tenant.
+    """
     if SessionFactory is None:
         raise RuntimeError("DATABASE_URL is not configured")
     code = code.strip().upper()
     async with SessionFactory() as session:
+        # Primary/legacy lookup: PG code belongs to the representative registration.
+        registration = await session.scalar(
+            select(RepresentativeRegistration)
+            .where(RepresentativeRegistration.tracking_code == code)
+        )
+        if registration is None:
+            return None
+
+        tenant = await session.scalar(
+            select(TenantRecord).where(TenantRecord.registration_id == registration.id)
+        )
+        if tenant is None:
+            return None
+
+        # A registration can have multiple customer orders. For a single-code
+        # lookup, show the newest order; the detail screen exposes its full state.
         result = await session.execute(
             select(Order, CheckoutRecord, ServiceSubscription, TenantRecord, RepresentativeRegistration)
             .outerjoin(CheckoutRecord, (CheckoutRecord.order_id == Order.id) & (CheckoutRecord.tenant_id == Order.tenant_id))
             .outerjoin(ServiceSubscription, (ServiceSubscription.order_id == Order.id) & (ServiceSubscription.tenant_id == Order.tenant_id))
             .join(TenantRecord, TenantRecord.id == Order.tenant_id)
             .join(RepresentativeRegistration, RepresentativeRegistration.id == TenantRecord.registration_id)
-            .where(RepresentativeRegistration.tracking_code == code)
+            .where(Order.tenant_id == tenant.id)
             .order_by(Order.id.desc())
         )
         return result.first()
@@ -169,7 +193,7 @@ def _detail(row) -> tuple[str, list[list[Button]]]:
     service_id = subscription.provider_service_id if subscription else None
     text = (
         "🧾 **مدیریت کامل سفارش**\n\n"
-        f"🆔 کد پیگیری: `{registration.tracking_code}`\n"
+        f"🆔 کد پیگیری نمایندگی: `{registration.tracking_code}`\n"
         f"📦 شماره سفارش: `{order.id}`\n"
         f"📌 وضعیت سفارش: **{order.status}**\n"
         f"🤖 ربات نمایندگی: @{tenant.bot_username or '—'}\n"
@@ -256,13 +280,13 @@ async def order_tracking_text(event):
     if text == "/ADMIN":
         return
     _AWAITING_TRACKING.discard(event.sender_id)
-    if not text.startswith("PG-"):
-        await event.respond("❌ کد پیگیری باید مثل `PG-Z74VB414` باشد.", buttons=[[Button.inline("🔎 دوباره وارد کردن", PREFIX + b"input")]])
+    if not _TRACKING_RE.fullmatch(text):
+        await event.respond("❌ کد پیگیری ناقص یا نامعتبر است.\n\nفرمت صحیح مثل `PG-Z74VB414` است.", buttons=[[Button.inline("🔎 دوباره وارد کردن", PREFIX + b"input")]])
         return
     try:
         row = await _find_tracking(text)
         if not row:
-            await event.respond("❌ این کد پیگیری پیدا نشد.", buttons=[[Button.inline("🔎 دوباره وارد کردن", PREFIX + b"input")]])
+            await event.respond("❌ کد پیگیری پیدا نشد یا هنوز برای این نمایندگی سفارشی ثبت نشده است.", buttons=[[Button.inline("🔎 دوباره وارد کردن", PREFIX + b"input")]])
             return
         detail, buttons = _detail(row)
         await event.respond(detail, buttons=buttons)
