@@ -58,7 +58,7 @@ async def _support(event):
     raw_support = (settings.get("support_username") or "").strip()
     if not raw_support:
         await event.answer("پشتیبانی هنوز توسط نماینده تنظیم نشده است.", alert=True)
-        return await event.edit("🆘 **پشتیبانی**\n\nپشتیبانی این فروشگاه هنوز تنظیم نشده است. لطفاً بعداً دوباره تلاش کنید.", buttons=[[Button.inline("🔙 فروشگاه", USER_PREFIX + b"home")]])
+        return
 
     support = raw_support.lstrip("@ ").strip()
     if support.startswith(("https://t.me/", "http://t.me/", "https://telegram.me/", "http://telegram.me/")):
@@ -72,8 +72,16 @@ async def _support(event):
         url = f"https://t.me/{support}"
         label = f"💬 ورود به @{support}"
 
+    # Do not edit the callback message here. The global Telegram markdown
+    # fallback can intercept malformed/legacy text and make the callback look
+    # unresponsive. Answer the callback and send a clean support message.
     await event.answer()
-    return await event.edit("🆘 **پشتیبانی**\n\nبرای ارتباط با پشتیبانی روی دکمه زیر بزنید 👇", buttons=[[Button.url(label, url)], [Button.inline("🔙 فروشگاه", USER_PREFIX + b"home")]])
+    return await event.respond(
+        "🆘 پشتیبانی\n\nبرای ارتباط با پشتیبانی روی دکمه زیر بزنید 👇",
+        buttons=[
+            [Button.url(label, url)],
+        ],
+    )
 
 
 async def callback_handler(event):
