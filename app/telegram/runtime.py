@@ -5,13 +5,13 @@ import hashlib
 import html
 import logging
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient
 
 from app.core.config import settings
 from app.db.session import initialize_database
 from app.services.tenant import TenantService
 from app.telegram.central import register_central_handlers
-from app.telegram.central.admin import admin_text, register_central_admin_handlers
+from app.telegram.central.admin import register_central_admin_handlers
 from app.telegram.central.order_tracking import install_order_tracking
 from app.telegram.representative.registry import registry
 
@@ -47,18 +47,6 @@ async def _safe_edit_message(self, entity, message_id: int, text: str, *, button
 
 
 TelegramClient.edit_message = _safe_edit_message
-
-
-async def _central_admin_text_guard(event):
-    """Forward central-admin text handling without duplicating /admin.
-
-    The /admin command has its own exact NewMessage handler. Keeping it out of
-    the generic incoming-text handler prevents one command from producing two
-    dashboard messages.
-    """
-    if event.raw_text and event.raw_text.strip() == "/admin":
-        return
-    await admin_text(event)
 
 
 async def _start_representative(tenant) -> bool:
@@ -104,11 +92,6 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     register_central_handlers(client)
     print("[telegram-runtime] central handlers registered", flush=True)
     register_central_admin_handlers(client)
-    # admin_text is already registered by register_central_admin_handlers().
-    # Replace only that generic handler with a guarded wrapper so /admin is
-    # handled exactly once by the dedicated /admin handler.
-    client.remove_event_handler(admin_text)
-    client.add_event_handler(_central_admin_text_guard, events.NewMessage(incoming=True))
     install_order_tracking(client)
     print("[telegram-runtime] central admin handlers registered", flush=True)
     print("[telegram-runtime] starting central bot", flush=True)
