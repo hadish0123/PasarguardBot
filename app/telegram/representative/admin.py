@@ -24,7 +24,8 @@ async def admin_callback(event):
  action=data[len(PREFIX):].decode(errors="ignore")
  if action==REP_HOME: t,b=await _page("admin"); await event.edit(t,buttons=b); return await event.answer()
  pages={REP_PLANS:"plans",REP_USERS:"users",REP_ORDERS:"orders",REP_SERVICES:"services",REP_DISCOUNTS:"discounts",REP_SALES:"sales",REP_TEXTS:"texts",REP_LOGS:"logs",REP_LINKS:"links",REP_SETTINGS:"settings",REP_PANEL:"panel"}
- if action in pages: t,b=await _page(pages[action]); await event.edit(t,buttons=b); return await event.answer()
+ if action in pages:
+  t,b=await _page(pages[action]); await event.edit(t,buttons=b); return await event.answer()
  if action==REP_SUPPORT:
   from app.telegram.representative.support_admin import render
   await render(event); return await event.answer()
