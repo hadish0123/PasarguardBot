@@ -13,6 +13,10 @@ DASHBOARD = RepresentativeDashboardService()
 _STATES: dict[tuple[str, int], dict[str, object]] = {}
 
 
+def _money(value: float) -> str:
+    return f"{round(float(value)):,.0f} تومان"
+
+
 def register(client, tenant_id: str | None = None) -> None:
     async def text_handler(event):
         async with tenant_dispatch(tenant_id):
@@ -44,7 +48,7 @@ async def render() -> tuple[str, list]:
             provider = f"🔌 Template: `{plan.provider_template_id}`" if plan.provider_template_id else "⚠️ بدون Template پاسارگارد"
             blocks.append(
                 f"#{plan.id} — **{plan.name}**\n"
-                f"💾 {plan.volume_gb:g} GB | ⏱ {plan.days} روز | 💰 {plan.price:g}\n"
+                f"💾 {plan.volume_gb:g} GB | ⏱ {plan.days} روز | 💰 {_money(plan.price)}\n"
                 f"{provider}\n{state}"
             )
         text = "\n\n".join(blocks)
@@ -107,7 +111,7 @@ async def plan_callback(event) -> None:
         state = "🟢 فعال" if plan.enabled else "🔴 غیرفعال"
         provider = f"🔌 Template پاسارگارد: `{plan.provider_template_id}`" if plan.provider_template_id else "⚠️ Template پاسارگارد تنظیم نشده"
         await event.edit(
-            f"📦 **{plan.name}**\n\n💾 حجم: `{plan.volume_gb:g} GB`\n⏱ مدت: `{plan.days}` روز\n💰 قیمت: `{plan.price:g}`\n{provider}\n📌 وضعیت: {state}",
+            f"📦 **{plan.name}**\n\n💾 حجم: `{plan.volume_gb:g} GB`\n⏱ مدت: `{plan.days}` روز\n💰 قیمت: `{_money(plan.price)}`\n{provider}\n📌 وضعیت: {state}",
             buttons=[
                 [Button.inline("✏️ ویرایش", PREFIX + f"edit:{plan.id}".encode())],
                 [Button.inline("🔄 تغییر وضعیت", PREFIX + f"toggle:{plan.id}".encode())],
@@ -165,11 +169,11 @@ async def plan_text(event) -> None:
         if step == "days":
             value = int(text)
             if value <= 0: raise ValueError("مدت باید بیشتر از صفر باشد.")
-            state.update(days=value, step="price"); await event.respond("💰 قیمت پلن را وارد کنید. عدد صفر هم مجاز است."); return
+            state.update(days=value, step="price"); await event.respond("💰 قیمت پلن را به **تومان** وارد کنید. مثال: `20000`"); return
         if step == "price":
             value = float(text)
             if value < 0: raise ValueError("قیمت نمی‌تواند منفی باشد.")
-            state.update(price=value, step="template")
+            state.update(price=round(value), step="template")
             await event.respond("🔌 شناسه Template پاسارگارد را وارد کنید. اگر ندارید `0` بفرستید."); return
         if step == "template":
             value = int(text)
@@ -197,11 +201,11 @@ async def plan_text(event) -> None:
         if step == "edit_days":
             value = int(text)
             if value <= 0: raise ValueError("مدت باید بیشتر از صفر باشد.")
-            state.update(days=value, step="edit_price"); await event.respond(f"💰 قیمت جدید را وارد کنید. مقدار فعلی: `{state['price']}`"); return
+            state.update(days=value, step="edit_price"); await event.respond(f"💰 قیمت جدید را به **تومان** وارد کنید. مقدار فعلی: `{_money(state['price'])}`"); return
         if step == "edit_price":
             value = float(text)
             if value < 0: raise ValueError("قیمت نمی‌تواند منفی باشد.")
-            state.update(price=value, step="edit_template"); await event.respond(f"🔌 شناسه Template جدید را وارد کنید. مقدار فعلی: `{state['template'] or 0}`"); return
+            state.update(price=round(value), step="edit_template"); await event.respond(f"🔌 شناسه Template جدید را وارد کنید. مقدار فعلی: `{state['template'] or 0}`"); return
         if step == "edit_template":
             value = int(text)
             if value < 0: raise ValueError("شناسه Template نمی‌تواند منفی باشد.")
