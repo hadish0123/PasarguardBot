@@ -210,6 +210,22 @@ async def admin_callback(event):
             except Exception:
                 pass
             return
+        if data.startswith(PREFIX + b"cancel:"):
+            registration_id = int(data.split(b":")[-1])
+            record = await REGISTRATIONS.get(registration_id)
+            if record is None:
+                await event.edit("❌ درخواست پیدا نشد.", buttons=dashboard_buttons())
+                return
+            await REGISTRATIONS.mark_rejected(record.id, None)
+            await event.edit(
+                "🗑 **درخواست لغو شد**\n\nدرخواست از صف بررسی حذف شد و نماینده می‌تواند دوباره درخواست جدید ثبت کند.",
+                buttons=[[Button.inline("🔙 درخواست‌های در انتظار", PREFIX + b"pending")], [Button.inline("🏠 داشبورد", PREFIX + b"home")]],
+            )
+            try:
+                await event.client.send_message(record.owner_id, "ℹ️ درخواست نمایندگی شما لغو شد. در صورت تمایل می‌توانید دوباره درخواست جدید ثبت کنید.")
+            except Exception:
+                pass
+            return
         if data.startswith(PREFIX + b"reject_prompt:"):
             registration_id = int(data.split(b":")[-1])
             await event.edit(
@@ -332,7 +348,7 @@ def detail_buttons(registration_id: int, status: str):
     rows = []
     if status == RegistrationStatus.PENDING.value:
         rows.append([Button.inline("✅ تأیید و شروع راه‌اندازی", PREFIX + f"approve:{registration_id}".encode())])
-        rows.append([Button.inline("❌ رد درخواست", PREFIX + f"reject_prompt:{registration_id}".encode())])
+        rows.append([Button.inline("🗑 لغو درخواست", PREFIX + f"cancel:{registration_id}".encode())])
     elif status == RegistrationStatus.FAILED.value:
         rows.append([Button.inline("🔄 تلاش مجدد راه‌اندازی", PREFIX + f"retry:{registration_id}".encode())])
     rows.append([Button.inline("🔙 درخواست‌های در انتظار", PREFIX + b"pending")])
