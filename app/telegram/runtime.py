@@ -15,6 +15,28 @@ from app.telegram.representative.registry import registry
 logger = logging.getLogger(__name__)
 
 
+# Telegram rejects dynamic Markdown when user/provider data contains characters
+# that are meaningful to the Markdown parser. Keep the normal Markdown path,
+# but transparently retry the edit as plain text so callback handlers cannot die
+# just because a detail field contains an underscore or another special char.
+_original_edit_message = TelegramClient.edit_message
+
+
+async def _safe_edit_message(self, entity, message_id: int, text: str, *, buttons=None, **kwargs):
+    try:
+        return await _original_edit_message(self, entity, message_id, text, buttons=buttons, **kwargs)
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        if "can't parse entities" not in message and "parse entities" not in message:
+            raise
+        retry_kwargs = dict(kwargs)
+        retry_kwargs["parse_mode"] = None
+        return await _original_edit_message(self, entity, message_id, text, buttons=buttons, **retry_kwargs)
+
+
+TelegramClient.edit_message = _safe_edit_message
+
+
 async def run(stop_event: asyncio.Event | None = None) -> None:
     print("[telegram-runtime] run() entered", flush=True)
     if not settings.central_bot_token:
