@@ -46,7 +46,7 @@ async def render_wallet(uid: int):
     buttons = [
         [Button.inline("➕ شارژ کیف پول", PREFIX + b"topup")],
         [Button.inline("🧾 تاریخچه کامل", PREFIX + b"history"), Button.inline("🔄 بروزرسانی", PREFIX + b"show")],
-        [Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())],
+        [Button.inline("🔙 فروشگاه", b"user:home")],
     ]
     return text, buttons
 
