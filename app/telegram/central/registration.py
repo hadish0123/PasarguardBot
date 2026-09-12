@@ -87,6 +87,9 @@ async def continue_registration(event):
                 await _safe_edit(event, "ℹ️ این درخواست دیگر در مرحله ورود اطلاعات نیست.")
                 return
             step = RegistrationStep(record.step)
+            if step == RegistrationStep.REVIEW:
+                await _safe_edit(event, review_text(record), buttons=review_buttons())
+                return
             prompt = PROMPTS.get(step)
             if not prompt:
                 await _safe_edit(event, "❌ مرحله ثبت نام نامعتبر است. از منوی اصلی دوباره شروع کنید.")
@@ -108,6 +111,8 @@ async def input_router(event):
         if record is None or record.status != RegistrationStatus.DRAFT.value:
             return
         step = RegistrationStep(record.step)
+        if step == RegistrationStep.REVIEW:
+            return
         value = event.raw_text.strip()
         progress = None
         try:
@@ -117,7 +122,8 @@ async def input_router(event):
         try:
             next_step, message = await process_step(record, step, value)
         except ValidationError as exc:
-            text = f"❌ {exc}\n\n{PROMPTS[step]}"
+            prompt = PROMPTS.get(step, "لطفاً اطلاعات همین مرحله را دوباره ارسال کنید.")
+            text = f"❌ {exc}\n\n{prompt}"
             if progress is not None:
                 try:
                     await progress.edit(text, buttons=wizard_buttons())
