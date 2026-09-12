@@ -11,6 +11,7 @@ from app.services.texts import SERVICE as TEXT_SERVICE
 HOME = b"user:home"
 BUY = b"user:buy"
 ORDER = b"user:order:"
+PROFILE = b"user:profile:show"
 
 
 async def register_handler(event, tenant_id):
@@ -31,8 +32,9 @@ async def register_handler(event, tenant_id):
         if data == BUY:
             plans = [p for p in await PlanService().list() if p.enabled]
             if not plans:
+                values = await TEXT_SERVICE.all()
                 return await event.edit(
-                    (await TEXT_SERVICE.all())["buy_title"] + "\n\n" + (await TEXT_SERVICE.all())["plans_empty"],
+                    values["buy_title"] + "\n\n" + values["plans_empty"],
                     buttons=[[Button.inline("🔙 فروشگاه", HOME)]],
                 )
             rows = [
@@ -52,7 +54,7 @@ async def customer_menu(values: dict | None = None):
     return [
         [Button.inline(values["buy_button"], BUY)],
         [Button.inline(values["services_button"], b"user:services"), Button.inline(values["wallet_button"], b"user:wallet")],
-        [Button.inline(values["profile_button"], b"user:profile"), Button.inline(values["referral_button"], b"user:referral")],
+        [Button.inline(values["profile_button"], PROFILE), Button.inline(values["referral_button"], b"user:referral")],
         [Button.inline(values["discount_button"], b"user:discount"), Button.inline(values["trial_button"], b"user:trial")],
         [Button.inline(values["support_button"], b"user:support")],
     ]
