@@ -3,11 +3,17 @@ from telethon import Button, events
 from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_users import SERVICE as USERS
+from app.services.representative_settings import SERVICE as SETTINGS
 from app.services.support import SERVICE
 from app.services.logs import SERVICE as LOGS
 PREFIX=b"user:support:"
+DIRECT=b"user:support"
 STATE={}
 def register(client,tenant_id=None):
+ async def direct_callback(event):
+  async with tenant_dispatch(tenant_id):
+   if not await allowed(event):return await event.answer("دسترسی به این بخش را ندارید.",alert=True)
+   return await direct_support(event)
  async def callback(event):
   async with tenant_dispatch(tenant_id):
    if not await allowed(event):return await event.answer("دسترسی به این بخش را ندارید.",alert=True)
@@ -15,11 +21,24 @@ def register(client,tenant_id=None):
  async def incoming(event):
   async with tenant_dispatch(tenant_id):
    if await allowed(event):await handle_input(event)
+ client.add_event_handler(direct_callback,events.CallbackQuery(func=lambda e:bool(e.data and bytes(e.data)==DIRECT)))
  client.add_event_handler(callback,events.CallbackQuery(func=lambda e:bool(e.data and e.data.startswith(PREFIX))))
  client.add_event_handler(incoming,events.NewMessage(incoming=True))
 async def allowed(event):
  if not event.is_private or not get_tenant():return False
  u=await USERS.get_by_telegram_id(event.sender_id);return bool(u and not u.blocked)
+async def direct_support(event):
+ raw=(await SETTINGS.snapshot()).get("support_username") or ""
+ support=raw.strip().lstrip("@ ").strip()
+ if not support:return await event.answer("پشتیبانی هنوز توسط نماینده تنظیم نشده است.",alert=True)
+ if support.startswith(("https://t.me/","http://t.me/","https://telegram.me/","http://telegram.me/")):
+  url=support;label="💬 ورود به چت پشتیبانی"
+ elif support.isdigit():
+  url=f"tg://user?id={support}";label="💬 ورود به چت پشتیبانی"
+ else:
+  support=support.split("/",1)[0].strip();url=f"https://t.me/{support}";label=f"💬 ورود به @{support}"
+ await event.answer()
+ return await event.respond("🆘 پشتیبانی\n\nبرای ارتباط با پشتیبانی روی دکمه زیر بزنید 👇",buttons=[[Button.url(label,url)]])
 def _buttons(rows):return [[Button.inline(f"🎫 #{r['id']} | {r['subject'][:28]}",PREFIX+f"view:{r['id']}".encode())] for r in rows]
 async def render(event,user_id=None):
  uid=user_id or event.sender_id;rows=await SERVICE.list_user(uid);labels={"open":"باز","in_progress":"در حال بررسی","resolved":"حل‌شده","closed":"بسته"}
