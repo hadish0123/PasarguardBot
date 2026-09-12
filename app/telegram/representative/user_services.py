@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from telethon import Button, events
 
 from app.core.ids import USER_HOME
-from app.db.models import TenantRecord
+from app.db.models import ServiceSubscription, TenantRecord
 from app.db.session import SessionFactory
 from app.runtime.context import get_tenant, require_tenant
 from app.runtime.dispatcher import tenant_dispatch
@@ -14,6 +14,7 @@ from app.services.representative_users import SERVICE as USERS
 from app.services.orders import SERVICE as ORDERS
 from app.services.secrets import get_secret_box
 from app.services.user_services import SERVICE
+from app.services.logs import SERVICE as LOG_SERVICE
 
 PREFIX = b"user:services:"
 
@@ -23,8 +24,15 @@ def register(client, tenant_id=None):
         async with tenant_dispatch(tenant_id):
             if not await allowed(event):
                 return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
-            await event.answer()
-            await render_callback(event)
+            try:
+                await event.answer()
+                await render_callback(event)
+            except Exception as exc:
+                await LOG_SERVICE.add("user.services.error", f"user={event.sender_id} error={type(exc).__name__}: {exc}", event.sender_id)
+                try:
+                    await event.answer("⚠️ خطایی هنگام بارگذاری سرویس‌ها رخ داد. لطفاً دوباره بزنید.", alert=True)
+                except Exception:
+                    pass
 
     client.add_event_handler(callback, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
 
@@ -122,8 +130,6 @@ async def _live_details(subscription_id: int, telegram_user_id: int):
         raise LookupError("سرویس پیدا نشد.")
     if not service.provider_service_id:
         return service, None
-    if SessionFactory is None:
-        return service, None
 
     tenant_id = require_tenant()
     async with SessionFactory() as session:
@@ -135,29 +141,38 @@ async def _live_details(subscription_id: int, telegram_user_id: int):
         panel_url = tenant.panel_url
 
     details = await PasarguardClient(panel_url, api_key).get_user_by_id(service.provider_service_id)
-    if SessionFactory is not None:
-        async with SessionFactory() as session:
-            current = await session.get(type(service), service.id)
-            if current is not None:
-                if details.subscription_url:
-                    current.subscription_url = details.subscription_url
-                if details.service_id:
-                    current.provider_service_id = details.service_id
-                if details.expire:
-                    current.expires_at = details.expire
-                if details.status == "expired" or (details.expire and details.expire <= datetime.now(timezone.utc)):
-                    current.status = "expired"
-                elif details.status == "active" and current.status not in {"revoked", "expired"}:
-                    current.status = "active"
-                await session.commit()
-                await session.refresh(current)
-                service = current
+
+    # Persist only provider facts that are safe to mirror locally. The user view
+    # still works from the local record when the panel is temporarily offline.
+    async with SessionFactory() as session:
+        current = await session.get(ServiceSubscription, service.id)
+        if current is not None:
+            if details.subscription_url:
+                current.subscription_url = details.subscription_url
+            if details.service_id:
+                current.provider_service_id = details.service_id
+            if details.expire:
+                current.expires_at = details.expire
+            if details.status == "expired" or (details.expire and details.expire <= datetime.now(timezone.utc)):
+                current.status = "expired"
+            elif details.status == "active" and current.status not in {"revoked", "expired"}:
+                current.status = "active"
+            await session.commit()
+            await session.refresh(current)
+            service = current
     return service, details
 
 
+async def _user_pending_orders(telegram_user_id: int):
+    # OrderService intentionally exposes tenant-scoped list/get methods only.
+    # Never call a non-existent list_for_user helper from the Telegram layer.
+    orders = await ORDERS.list(status="pending", limit=50)
+    return [order for order in orders if order.telegram_user_id == telegram_user_id][:10]
+
+
 async def render_user(telegram_user_id: int):
-    services = await SERVICE.subscriptions(telegram_user_id)
-    pending_orders = await ORDERS.list_for_user(telegram_user_id, status="pending", limit=10)
+    services = await SERVICE.subscriptions(telegram_user_id, limit=50)
+    pending_orders = await _user_pending_orders(telegram_user_id)
     if not services and not pending_orders:
         return (
             "📦 سرویس‌های من\n\nهنوز سرویسی برای شما ساخته نشده است.",
@@ -214,7 +229,6 @@ async def _send_credentials(event, service, details: PasarguardUserDetails | Non
     urls = _config_urls(subscription_url)
     if not urls:
         return await event.respond("⚠️ لینک اشتراک هنوز برای این سرویس آماده نشده است.")
-    # Keep the subscription and client configs in separate messages as requested.
     await event.respond(f"🔗 سابسکریپشن سرویس #{service.id}\n\n{urls[0][1]}")
     config_text = "📥 کانفیگ‌های سرویس\n\n" + "\n".join(f"{label}:\n{url}" for label, url in urls[1:])
     await event.respond(config_text)
@@ -223,9 +237,8 @@ async def _send_credentials(event, service, details: PasarguardUserDetails | Non
 async def render_callback(event):
     action = event.data[len(PREFIX):].decode(errors="ignore")
     if action in ("", "list"):
-        t, b = await render_user(event.sender_id)
-        await event.edit(t, buttons=b)
-        return
+        text, buttons = await render_user(event.sender_id)
+        return await event.edit(text, buttons=buttons)
 
     if action.startswith("view:"):
         try:
