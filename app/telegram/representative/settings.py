@@ -21,10 +21,19 @@ def register(client,tenant_id=None):
     INPUTS.pop(key,None); return await event.respond("❌ عملیات لغو شد.",buttons=(await render())[1])
    try:
     if field=="force_join_channel_id":
-     channel_id=int(value)
-     if channel_id >= 0: raise ValueError("آیدی عددی کانال باید با -100 شروع شود؛ مثال: -1001234567890")
-     perms=await event.client.get_permissions(channel_id,"me")
-     if not getattr(perms,"is_admin",False): raise ValueError("ربات در این کانال ادمین نیست. ابتدا ربات را به کانال اضافه و ادمین کنید، سپس آیدی کانال را ارسال کنید.")
+     normalized=value.replace("−","-").replace(" ","")
+     if not normalized.startswith("-100") or not normalized[1:].isdigit():
+      return await event.respond("❌ آیدی کانال نامعتبر است. فقط آیدی عددی کانال با فرمت `-100...` را ارسال کنید؛ مثال: `-1001234567890`.")
+     channel_id=int(normalized)
+     try:
+      channel=await event.client.get_entity(channel_id)
+     except Exception:
+      channel=None
+     if channel is None:
+      raise ValueError("کانال پیدا نشد. مطمئن شوید همین ربات عضو کانال است و سپس دوباره آیدی عددی کانال را ارسال کنید.")
+     perms=await event.client.get_permissions(channel,"me")
+     if not getattr(perms,"is_admin",False):
+      raise ValueError("ربات در این کانال ادمین نیست. ابتدا ربات را ادمین کنید و دوباره تلاش کنید.")
      await SERVICE.set(field,str(channel_id))
     elif field=="referral_reward_value":
      mode=(await SERVICE.snapshot()).get("referral_reward_mode","none")
@@ -38,7 +47,8 @@ def register(client,tenant_id=None):
       await SERVICE.set(field,str(parsed))
     else: await SERVICE.set(field,value)
    except ValueError as exc:return await event.respond(f"❌ {exc}\n\nمقدار را اصلاح کنید یا `/cancel` بزنید.")
-   except Exception:return await event.respond("❌ کانال قابل بررسی نیست. مطمئن شوید ربات داخل کانال است و دسترسی ادمین دارد.")
+   except Exception as exc:
+    return await event.respond("❌ بررسی دسترسی ربات به کانال انجام نشد. مطمئن شوید ربات داخل کانال است و ادمین است، سپس دوباره آیدی کانال را ارسال کنید.")
    INPUTS.pop(key,None); text,buttons=await render(); await event.respond("✅ تنظیمات ذخیره شد.",buttons=buttons)
  client.add_event_handler(cb,events.CallbackQuery(func=lambda e:bool(e.data and e.data.startswith(PREFIX))))
  client.add_event_handler(msg,events.NewMessage(incoming=True))
