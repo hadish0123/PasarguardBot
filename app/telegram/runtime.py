@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import logging
 
@@ -16,11 +17,10 @@ from app.telegram.representative.registry import registry
 logger = logging.getLogger(__name__)
 
 
-# Telegram rejects dynamic Markdown when runtime data contains characters that
-# have special meaning to the Markdown parser. Keep the normal Markdown path,
-# but retry failed edits using HTML with the entire message escaped. This makes
-# the fallback safe even when the text contains underscores, brackets, asterisks,
-# backticks, or user/provider supplied angle brackets.
+def _token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+
+
 _original_edit_message = TelegramClient.edit_message
 
 
@@ -66,6 +66,12 @@ async def run(stop_event: asyncio.Event | None = None) -> None:
     print("[telegram-runtime] central admin handlers registered", flush=True)
     print("[telegram-runtime] starting central bot", flush=True)
     await client.start(bot_token=settings.central_bot_token)
+    logger.info(
+        "[central-runtime] initialized bot_id=%s bot_username=%s token_fp=%s",
+        getattr(getattr(client, "_me", None), "id", "unknown"),
+        getattr(getattr(client, "_me", None), "username", "") or "",
+        _token_fingerprint(settings.central_bot_token),
+    )
     print("[telegram-runtime] central bot started", flush=True)
 
     tenant_service = TenantService()
