@@ -69,10 +69,6 @@ class PasarguardProvisioningService:
             tenant = await session.get(TenantRecord, tenant_id)
             if plan is None or tenant is None:
                 raise LookupError("پلن یا نمایندگی پیدا نشد.")
-            if not plan.provider_template_id:
-                subscription.status = "pending_provisioning"
-                await session.commit()
-                raise ValueError("این پلن Template پاسارگارد ندارد؛ ابتدا Template را در مدیریت پلن تنظیم کنید.")
 
             subscription.status = "provisioning"
             await session.commit()
@@ -84,14 +80,15 @@ class PasarguardProvisioningService:
             username = f"tg_{order.telegram_user_id}_{order.id}"
             note = (
                 f"Representative tenant={tenant_id}; order={order.id}; "
-                f"telegram_user={order.telegram_user_id}"
+                f"telegram_user={order.telegram_user_id}; plan={plan.name}"
             )
 
             try:
-                provisioned = await client.create_user_from_template(
-                    plan.provider_template_id,
-                    username,
-                    note,
+                provisioned = await client.create_user_for_plan(
+                    username=username,
+                    volume_gb=order.volume_gb,
+                    days=order.days,
+                    note=note,
                 )
             except Exception:
                 subscription.status = "pending_provisioning"
