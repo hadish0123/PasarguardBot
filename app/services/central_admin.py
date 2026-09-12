@@ -4,12 +4,13 @@ from sqlalchemy import select
 
 from app.core.exceptions import PermissionDenied
 from app.core.config import settings
-from app.db.models import RegistrationStatus, RepresentativeRegistration
+from app.db.models import RegistrationStatus, RepresentativeRegistration, TenantRecord, TenantStatus
 from app.db.session import SessionFactory
+from app.services.secrets import get_secret_box
 
 
 class CentralAdminService:
-    """Central-only authorization and registration approval boundary."""
+    """Central-only authorization and registration/tenant management boundary."""
 
     @staticmethod
     def is_admin(user_id: int) -> bool:
@@ -68,3 +69,44 @@ class CentralAdminService:
             await session.commit()
             await session.refresh(record)
             return record
+
+    async def tenants(self) -> list[TenantRecord]:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            result = await session.execute(select(TenantRecord).order_by(TenantRecord.id.asc()))
+            return list(result.scalars().all())
+
+    async def get_tenant(self, tenant_id: str) -> TenantRecord | None:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            return await session.get(TenantRecord, tenant_id)
+
+    async def get_tenant_by_bot_id(self, bot_id: int) -> TenantRecord | None:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            return await session.scalar(select(TenantRecord).where(TenantRecord.bot_id == bot_id))
+
+    async def set_tenant_status(self, tenant_id: str, status: TenantStatus) -> TenantRecord:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            record = await session.get(TenantRecord, tenant_id)
+            if record is None:
+                raise LookupError("tenant not found")
+            record.status = status.value
+            await session.commit()
+            await session.refresh(record)
+            return record
+
+    async def get_tenant_bot_token(self, tenant_id: str) -> str:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            record = await session.get(TenantRecord, tenant_id)
+            if record is None or not record.bot_token_encrypted:
+                raise LookupError("bot token not found")
+            encrypted = record.bot_token_encrypted
+        return get_secret_box().decrypt(encrypted).strip()
