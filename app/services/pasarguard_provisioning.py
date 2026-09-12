@@ -15,8 +15,8 @@ PROVISIONING_STALE_AFTER = timedelta(minutes=10)
 
 
 class PasarguardProvisioningService:
-    async def provision_paid_order(self, order_id: int) -> ServiceSubscription:
-        tenant_id = require_tenant()
+    async def provision_paid_order(self, order_id: int, tenant_id: str | None = None) -> ServiceSubscription:
+        tenant_id = tenant_id or require_tenant()
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
 
