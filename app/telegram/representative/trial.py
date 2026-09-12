@@ -18,7 +18,13 @@ async def allowed(event):
 async def render_callback(event):
  action=event.data[len(PREFIX):].decode(errors="ignore").lstrip(":")
  if action in ("","claim"):
-  try:plan=await SERVICE.claim(event.sender_id)
-  except (ValueError,LookupError) as exc:return await event.edit(f"🎁 **سرویس آزمایشی**\n\n❌ {exc}",buttons=[[Button.inline("🔙 فروشگاه",b"user:"+USER_HOME.encode())]])
-  return await event.edit(f"🎁 **درخواست سرویس آزمایشی ثبت شد**\n\n📦 پلن: **{plan.name}**\n💾 حجم: **{plan.volume_gb:g} GB**\n📅 مدت: **{plan.days} روز**\n\n⏳ فعال‌سازی سرویس در مرحله تحویل Pasarguard انجام می‌شود.",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
+  try:
+   plan,subscription=await SERVICE.claim(event.sender_id)
+  except (ValueError,LookupError) as exc:
+   return await event.edit(f"🎁 **سرویس آزمایشی**\n\n❌ {exc}",buttons=[[Button.inline("🔙 فروشگاه",b"user:"+USER_HOME.encode())]])
+  except Exception as exc:
+   return await event.edit(f"🎁 **سرویس آزمایشی**\n\n❌ ساخت سرویس در پاسارگارد انجام نشد.\n\n{str(exc)[:300]}",buttons=[[Button.inline("🔄 تلاش دوباره",PREFIX+b"claim")],[Button.inline("🔙 فروشگاه",b"user:"+USER_HOME.encode())]])
+  rows=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]]
+  if subscription.subscription_url: rows.insert(0,[Button.url("🔗 لینک اشتراک",subscription.subscription_url)])
+  return await event.edit(f"🎉 **سرویس آزمایشی فعال شد**\n\n📦 پلن: **{plan.name}**\n💾 حجم: **{float(plan.volume_gb):g} GB**\n📅 مدت: **{plan.days} روز**\n\n✅ سرویس مستقیماً در پاسارگارد ساخته و فعال شد.",buttons=rows)
  await event.answer("گزینه نامعتبر است.",alert=True)
