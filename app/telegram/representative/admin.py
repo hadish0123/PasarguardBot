@@ -19,15 +19,13 @@ async def admin_callback(event):
  data=event.data
  if not data or not data.startswith(PREFIX): return
  if not await _authorized(event): return await event.answer("دسترسی مدیریت ندارید.",alert=True)
- child=(b"rep:plans:",b"rep:users:",b"rep:orders:",b"rep:services:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:",b"rep:links:",b"rep:settings:",b"rep:panel:",b"rep:support:")
+ if data.startswith(b"rep:orders:"):
+  from app.telegram.representative.orders import callback_handler
+  return await callback_handler(event)
+ child=(b"rep:plans:",b"rep:users:",b"rep:services:",b"rep:discounts:",b"rep:sales:",b"rep:texts:",b"rep:logs:",b"rep:links:",b"rep:settings:",b"rep:panel:",b"rep:support:")
  if data.startswith(child): return
  action=data[len(PREFIX):].decode(errors="ignore")
  if action==REP_HOME: t,b=await _page("admin"); await event.edit(t,buttons=b); return await event.answer()
- if action==REP_ORDERS:
-  from app.telegram.representative.orders import render
-  t,b=await render("all")
-  await event.edit(t,buttons=b)
-  return await event.answer()
  pages={REP_PLANS:"plans",REP_USERS:"users",REP_ORDERS:"orders",REP_SERVICES:"services",REP_DISCOUNTS:"discounts",REP_SALES:"sales",REP_TEXTS:"texts",REP_LOGS:"logs",REP_LINKS:"links",REP_SETTINGS:"settings",REP_PANEL:"panel"}
  if action in pages: t,b=await _page(pages[action]); await event.edit(t,buttons=b); return await event.answer()
  if action==REP_SUPPORT:
