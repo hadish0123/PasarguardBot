@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import time
 import uuid
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -88,10 +89,10 @@ class PasarguardClient:
             return len(data)
         raise ExternalServiceError("ساختار پاسخ تعداد کلاینت‌های پاسارگارد نامعتبر است.")
 
-    async def _first_group_id(self) -> int | None:
+    async def _group_ids(self) -> list[int]:
         response = await self._request("GET", "/api/groups/simple", params={"limit": 100})
         if response.status_code == 404:
-            return None
+            raise ExternalServiceError("API گروه‌های پاسارگارد در دسترس نیست.")
         if not response.is_success:
             detail = response.text.strip()[:500]
             raise ExternalServiceError(f"دریافت گروه‌های پاسارگارد ناموفق بود (HTTP {response.status_code}). {detail}")
@@ -105,21 +106,24 @@ class PasarguardClient:
             items = data.get("items") or data.get("groups") or []
         else:
             items = []
+        group_ids: list[int] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
-            if item.get("is_disabled") is True or item.get("disabled") is True:
-                continue
             item_id = item.get("id")
             if isinstance(item_id, int) and item_id > 0:
-                return item_id
-        return None
+                group_ids.append(item_id)
+        return list(dict.fromkeys(group_ids))
+
+    async def _first_group_id(self) -> int | None:
+        group_ids = await self._group_ids()
+        return group_ids[0] if group_ids else None
 
     async def create_test_user(self) -> ProvisionedUser:
         username = f"pasarguard_test_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         group_id = await self._first_group_id()
         if group_id is None:
-            raise ExternalServiceError("هیچ گروه فعالی در پنل پاسارگارد پیدا نشد؛ کلاینت تستی بدون گروه ساخته نمی‌شود.")
+            raise ExternalServiceError("هیچ گروهی در پنل پاسارگارد پیدا نشد؛ کلاینت تستی بدون گروه ساخته نمی‌شود.")
         response = await self._request("POST", "/api/user", json={"username": username, "group_ids": [group_id]})
         if not response.is_success:
             detail = response.text.strip()[:500]
@@ -141,6 +145,53 @@ class PasarguardClient:
         count = await self.client_count()
         test_user = await self.create_test_user()
         return PanelProbe(client_count=count + 1, test_user=test_user)
+
+    async def create_user_for_plan(
+        self,
+        username: str,
+        volume_gb: float,
+        days: int,
+        note: str | None = None,
+    ) -> ProvisionedUser:
+        if not username or len(username) < 3:
+            raise ValueError("نام کاربر پاسارگارد نامعتبر است.")
+        if volume_gb <= 0 or days <= 0:
+            raise ValueError("حجم و مدت سرویس باید بیشتر از صفر باشند.")
+
+        group_ids = await self._group_ids()
+        if not group_ids:
+            raise ExternalServiceError("هیچ گروهی در پنل پاسارگارد پیدا نشد؛ ساخت کلاینت متوقف شد.")
+
+        expire = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=int(days))
+        data_limit = int(round(float(volume_gb) * 1024 * 1024 * 1024))
+        payload: dict[str, object] = {
+            "username": username,
+            "group_ids": group_ids,
+            "data_limit": data_limit,
+            "data_limit_reset_strategy": "no_reset",
+            "expire": expire.isoformat(),
+            "status": "active",
+            "proxy_settings": {},
+        }
+        if note:
+            payload["note"] = note
+
+        response = await self._request("POST", "/api/user", json=payload)
+        if not response.is_success:
+            raise ExternalServiceError(
+                f"ساخت کلاینت در پاسارگارد ناموفق بود (HTTP {response.status_code}). {response.text.strip()[:500]}"
+            )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ExternalServiceError("پاسخ ساخت کلاینت پاسارگارد JSON معتبر نیست.") from exc
+        if not isinstance(data, dict):
+            raise ExternalServiceError("پاسخ پاسارگارد برای کلاینت ساختاری نامعتبر دارد.")
+        service_id = data.get("id") or data.get("user_id") or data.get("username")
+        subscription_url = self._absolute_subscription_url(data.get("subscription_url") or data.get("subscriptionUrl"))
+        if service_id is None:
+            raise ExternalServiceError("پاسارگارد کلاینت را ساخت اما شناسه آن را برنگرداند.")
+        return ProvisionedUser(str(service_id), subscription_url)
 
     async def create_user_from_template(self, user_template_id: int, username: str, note: str | None = None) -> ProvisionedUser:
         if user_template_id <= 0 or not username or len(username) < 3:
