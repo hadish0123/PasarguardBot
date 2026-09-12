@@ -21,9 +21,21 @@ def register(client,tenant_id=None):
     INPUTS.pop(key,None); return await event.respond("❌ عملیات لغو شد.",buttons=(await render())[1])
    try:
     if field=="force_join_channel_id":
-     channel_id=int(value); perms=await event.client.get_permissions(channel_id,"me")
+     channel_id=int(value)
+     if channel_id >= 0: raise ValueError("آیدی عددی کانال باید با -100 شروع شود؛ مثال: -1001234567890")
+     perms=await event.client.get_permissions(channel_id,"me")
      if not getattr(perms,"is_admin",False): raise ValueError("ربات در این کانال ادمین نیست. ابتدا ربات را به کانال اضافه و ادمین کنید، سپس آیدی کانال را ارسال کنید.")
      await SERVICE.set(field,str(channel_id))
+    elif field=="referral_reward_value":
+     mode=(await SERVICE.snapshot()).get("referral_reward_mode","none")
+     if mode=="fixed":
+      parsed=int(value)
+      if parsed < 0: raise ValueError("مبلغ پاداش نمی‌تواند منفی باشد.")
+      await SERVICE.set(field,str(parsed))
+     else:
+      parsed=float(value.replace("٪","%").replace("%","").replace(",","."))
+      if parsed < 0 or parsed > 100: raise ValueError("درصد پاداش باید بین ۰ تا ۱۰۰ باشد.")
+      await SERVICE.set(field,str(parsed))
     else: await SERVICE.set(field,value)
    except ValueError as exc:return await event.respond(f"❌ {exc}\n\nمقدار را اصلاح کنید یا `/cancel` بزنید.")
    except Exception:return await event.respond("❌ کانال قابل بررسی نیست. مطمئن شوید ربات داخل کانال است و دسترسی ادمین دارد.")
@@ -49,8 +61,10 @@ async def handle(event):
   if mode=="none": await SERVICE.set("referral_reward_value","0"); text,buttons=await render(); return await event.edit(text,buttons=buttons)
   INPUTS[key]="referral_reward_value"; prompt="💵 مبلغ ثابت پاداش را به تومان ارسال کنید:" if mode=="fixed" else "📈 درصد پاداش از هر خرید را ارسال کنید (۰ تا ۱۰۰):"; return await event.edit(prompt+"\n\nبرای لغو `/cancel`",buttons=[[Button.inline("❌ لغو",PREFIX+b"list")]])
  if action=="forcejoin":
+  INPUTS[key]="force_join_channel_id"
   return await event.edit("📢 **تنظیم جوین اجباری**\n\n۱) همین ربات را ابتدا داخل کانال اضافه و **ادمین** کنید.\n۲) سپس آیدی عددی کانال را ارسال کنید؛ مثال: `-1001234567890`\n۳) ربات بررسی می‌کند که خودش ادمین کانال باشد و فقط در صورت تأیید تنظیم ذخیره می‌شود.\n\nبرای لغو `/cancel`",buttons=[[Button.inline("🗑 حذف جوین اجباری",PREFIX+b"forcejoin:clear")],[Button.inline("🔙 تنظیمات",PREFIX+b"list")]])
  if action=="forcejoin:clear":
-  await SERVICE.set("force_join_channel_id",""); text,buttons=await render(); return await event.edit(text,buttons=buttons)
- if action=="list": text,buttons=await render(); return await event.edit(text,buttons=buttons)
+  INPUTS.pop(key,None); await SERVICE.set("force_join_channel_id",""); text,buttons=await render(); return await event.edit(text,buttons=buttons)
+ if action=="list":
+  INPUTS.pop(key,None); text,buttons=await render(); return await event.edit(text,buttons=buttons)
  return await event.answer("گزینه نامعتبر است.",alert=True)
