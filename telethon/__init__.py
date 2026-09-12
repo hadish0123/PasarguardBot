@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -12,6 +13,12 @@ import aiohttp
 from . import events
 
 logger = logging.getLogger(__name__)
+
+
+def _token_fingerprint(token: str | None) -> str:
+    if not token:
+        return "none"
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
 
 
 class Button:
@@ -145,6 +152,7 @@ class TelegramClient:
         self.api_id = api_id
         self.api_hash = api_hash
         self._token: str | None = None
+        self._token_fingerprint = "none"
         self._base_url: str | None = None
         self._session: aiohttp.ClientSession | None = None
         self._handlers: list[tuple[Any, Any]] = []
@@ -152,21 +160,26 @@ class TelegramClient:
         self._me: _Sender | None = None
         self._bot_message_ids: dict[int, set[int]] = {}
         self._background_tasks: set[asyncio.Task] = set()
+        self._polling = False
 
     def add_event_handler(self, callback, event):
         self._handlers.append((callback, event))
 
     async def start(self, *, bot_token: str | None = None, **kwargs):
-        token = bot_token or self._token
+        token = (bot_token or self._token or "").strip()
         if not token:
             raise RuntimeError("BOT_TOKEN is required")
+        if self._polling:
+            raise RuntimeError("Telegram client is already polling")
         self._token = token
+        self._token_fingerprint = _token_fingerprint(token)
         self._base_url = f"https://api.telegram.org/bot{token}"
         if self._session is None or self._session.closed:
             connector = aiohttp.TCPConnector(limit=100, limit_per_host=100, ttl_dns_cache=300, keepalive_timeout=30)
             self._session = aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=35))
         me = await self._request("getMe")
         self._me = _Sender(id=int(me["id"]), first_name=me.get("first_name"), username=me.get("username"))
+        logger.info("Telegram client initialized session=%s bot_id=%s bot_username=%s token_fp=%s", self.session, self._me.id, self._me.username or "", self._token_fingerprint)
         return self
 
     async def _request(self, method: str, payload: dict[str, Any] | None = None):
@@ -259,19 +272,32 @@ class TelegramClient:
         return _Sender(id=int(result["id"]), first_name=result.get("first_name"), username=result.get("username"))
 
     async def run_until_disconnected(self):
+        if self._polling:
+            raise RuntimeError("Telegram client polling already active")
+        self._polling = True
         offset = 0
-        while not self._stop.is_set():
-            try:
-                updates = await self._request("getUpdates", {"offset": offset, "timeout": 25, "allowed_updates": ["message", "callback_query"]})
-                for update in updates or []:
-                    offset = max(offset, int(update["update_id"]) + 1)
-                    self._dispatch_in_background(update)
-                await asyncio.sleep(0)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Telegram Bot API polling failed")
-                await asyncio.sleep(0.5)
+        logger.info("Telegram polling started session=%s bot_id=%s token_fp=%s", self.session, self._me.id if self._me else "unknown", self._token_fingerprint)
+        try:
+            while not self._stop.is_set():
+                try:
+                    updates = await self._request("getUpdates", {"offset": offset, "timeout": 25, "allowed_updates": ["message", "callback_query"]})
+                    for update in updates or []:
+                        offset = max(offset, int(update["update_id"]) + 1)
+                        self._dispatch_in_background(update)
+                    await asyncio.sleep(0)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    message = str(exc)
+                    if "Conflict: terminated by other getUpdates request" in message:
+                        logger.error("Telegram polling conflict session=%s bot_id=%s token_fp=%s; another poller is using this bot token", self.session, self._me.id if self._me else "unknown", self._token_fingerprint)
+                        await asyncio.sleep(2)
+                    else:
+                        logger.exception("Telegram Bot API polling failed session=%s token_fp=%s", self.session, self._token_fingerprint)
+                        await asyncio.sleep(0.5)
+        finally:
+            self._polling = False
+            logger.info("Telegram polling stopped session=%s bot_id=%s token_fp=%s", self.session, self._me.id if self._me else "unknown", self._token_fingerprint)
 
     def _dispatch_in_background(self, update):
         task = asyncio.create_task(self._dispatch(update), name="telegram-update-dispatch")
@@ -324,6 +350,7 @@ class TelegramClient:
             await asyncio.gather(*tasks, return_exceptions=True)
         if self._session and not self._session.closed:
             await self._session.close()
+        self._polling = False
 
 
 __all__ = ["Button", "TelegramClient", "events"]
