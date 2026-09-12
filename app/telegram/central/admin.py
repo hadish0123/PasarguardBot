@@ -15,6 +15,7 @@ PROVISIONER = ProvisioningService()
 REGISTRATIONS = RegistrationStore()
 PREFIX = b"central:admin:"
 _AWAITING_BOT_ID: set[int] = set()
+_AWAITING_OWNER_ID: dict[int, str] = {}
 
 
 def register_central_admin_handlers(client) -> None:
@@ -34,6 +35,7 @@ async def admin_start(event):
     if not is_admin(event):
         return
     _AWAITING_BOT_ID.discard(event.sender_id)
+    _AWAITING_OWNER_ID.pop(event.sender_id, None)
     await event.respond(await dashboard_text(), buttons=dashboard_buttons())
 
 
@@ -59,6 +61,29 @@ async def admin_text(event):
         except Exception as exc:
             print(f"[central-admin] BOT ID LOOKUP ERROR: {type(exc).__name__}: {exc}", flush=True)
             await event.respond("❌ بررسی شناسه ربات انجام نشد.", buttons=dashboard_buttons())
+        return
+
+    if event.sender_id in _AWAITING_OWNER_ID:
+        tenant_id = _AWAITING_OWNER_ID.pop(event.sender_id)
+        if not text.isdigit():
+            await event.respond("❌ شناسه ادمین باید فقط عدد باشد.", buttons=[[Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant_id}".encode())]])
+            return
+        try:
+            owner_id = int(text)
+            tenant = await SERVICE.change_tenant_owner(tenant_id, owner_id)
+            await event.respond(
+                "✅ **ادمین پنل با موفقیت تغییر کرد.**\n\n"
+                f"👤 ادمین جدید: `{tenant.owner_id}`\n\n"
+                "از این پس پنل مدیریت ربات برای این شناسه در دسترس است.",
+                buttons=tenant_buttons(tenant.id, tenant.status),
+            )
+            try:
+                await event.client.send_message(tenant.owner_id, "🛠 شما به عنوان ادمین پنل مدیریت ربات نمایندگی تعیین شدید.")
+            except Exception:
+                pass
+        except Exception as exc:
+            print(f"[central-admin] OWNER CHANGE ERROR: {type(exc).__name__}: {exc}", flush=True)
+            await event.respond("❌ تغییر ادمین انجام نشد.", buttons=[[Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant_id}".encode())]])
         return
 
     if text.startswith("reject:"):
@@ -94,6 +119,7 @@ async def admin_callback(event):
     try:
         if data == PREFIX + b"home":
             _AWAITING_BOT_ID.discard(event.sender_id)
+            _AWAITING_OWNER_ID.pop(event.sender_id, None)
             await event.edit(await dashboard_text(), buttons=dashboard_buttons())
             return
         if data == PREFIX + b"pending":
@@ -104,6 +130,7 @@ async def admin_callback(event):
             return
         if data == PREFIX + b"lookup":
             _AWAITING_BOT_ID.add(event.sender_id)
+            _AWAITING_OWNER_ID.pop(event.sender_id, None)
             await event.edit(
                 "🤖 **مدیریت ربات**\n\nشناسه عددی ربات نمایندگی را ارسال کنید:\n\nمثال: `123456789`",
                 buttons=[[Button.inline("🔙 بازگشت", PREFIX + b"home")]],
@@ -122,7 +149,7 @@ async def admin_callback(event):
                 await event.edit(detail_text(record), buttons=detail_buttons(record.id, record.status))
             return
         if data.startswith(PREFIX + b"tenant:"):
-            tenant_id = data.split(b":", 1)[1].decode("utf-8")
+            tenant_id = data[len(PREFIX) + len(b"tenant:"):].decode("utf-8")
             tenant = await SERVICE.get_tenant(tenant_id)
             if tenant is None:
                 await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
@@ -130,7 +157,7 @@ async def admin_callback(event):
             await event.edit(tenant_detail_text(tenant, registry.is_running(tenant.id)), buttons=tenant_buttons(tenant.id, tenant.status))
             return
         if data.startswith(PREFIX + b"disable:"):
-            tenant_id = data.split(b":", 1)[1].decode("utf-8")
+            tenant_id = data[len(PREFIX) + len(b"disable:"):].decode("utf-8")
             tenant = await SERVICE.get_tenant(tenant_id)
             if tenant is None:
                 await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
@@ -147,7 +174,7 @@ async def admin_callback(event):
                 pass
             return
         if data.startswith(PREFIX + b"enable:"):
-            tenant_id = data.split(b":", 1)[1].decode("utf-8")
+            tenant_id = data[len(PREFIX) + len(b"enable:"):].decode("utf-8")
             tenant = await SERVICE.get_tenant(tenant_id)
             if tenant is None:
                 await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
@@ -161,6 +188,63 @@ async def admin_callback(event):
             )
             try:
                 await event.client.send_message(tenant.owner_id, "✅ ربات نمایندگی شما توسط مدیریت مرکزی دوباره فعال شد.")
+            except Exception:
+                pass
+            return
+        if data.startswith(PREFIX + b"owner:"):
+            tenant_id = data[len(PREFIX) + len(b"owner:"):].decode("utf-8")
+            tenant = await SERVICE.get_tenant(tenant_id)
+            if tenant is None:
+                await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
+                return
+            _AWAITING_OWNER_ID[event.sender_id] = tenant.id
+            _AWAITING_BOT_ID.discard(event.sender_id)
+            await event.edit(
+                "👤 **تغییر ادمین پنل مدیریت**\n\n"
+                "شناسه عددی تلگرام ادمین جدید را ارسال کنید.\n\n"
+                f"ادمین فعلی: `{tenant.owner_id}`\n\n"
+                "مثال: `123456789`",
+                buttons=[[Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant.id}".encode())]],
+            )
+            return
+        if data.startswith(PREFIX + b"delete_confirm:"):
+            tenant_id = data[len(PREFIX) + len(b"delete_confirm:"):].decode("utf-8")
+            tenant = await SERVICE.get_tenant(tenant_id)
+            if tenant is None:
+                await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
+                return
+            await event.edit(
+                "⚠️ **حذف ربات نمایندگی**\n\n"
+                f"🤖 @{tenant.bot_username or '—'}\n"
+                f"🆔 Bot ID: `{tenant.bot_id}`\n\n"
+                "این عملیات ربات را متوقف و رکورد نمایندگی را از فهرست مدیریت مرکزی حذف می‌کند.\n"
+                "اطلاعات فروش و سوابق دیتابیس به صورت خودکار پاک نمی‌شوند.\n\n"
+                "آیا مطمئن هستید؟",
+                buttons=[
+                    [Button.inline("🗑 بله، حذف کن", PREFIX + f"delete:{tenant.id}".encode())],
+                    [Button.inline("🔙 بازگشت", PREFIX + f"tenant:{tenant.id}".encode())],
+                ],
+            )
+            return
+        if data.startswith(PREFIX + b"delete:"):
+            tenant_id = data[len(PREFIX) + len(b"delete:"):].decode("utf-8")
+            tenant = await SERVICE.get_tenant(tenant_id)
+            if tenant is None:
+                await event.edit("❌ ربات پیدا نشد.", buttons=dashboard_buttons())
+                return
+            owner_id = tenant.owner_id
+            bot_username = tenant.bot_username
+            await registry.stop(tenant.id)
+            await SERVICE.delete_tenant(tenant.id)
+            await event.edit(
+                "🗑 **ربات با موفقیت حذف شد**\n\n"
+                f"🤖 @{bot_username or '—'}\n"
+                f"👤 ادمین قبلی: `{owner_id}`\n\n"
+                "ربات متوقف شد و دیگر در فهرست ربات‌های نمایندگان نمایش داده نمی‌شود.",
+                buttons=dashboard_buttons(),
+            )
+            try:
+                await event.client.send_message(owner_id, "⚠️ ربات نمایندگی شما توسط مدیریت مرکزی حذف شد و دیگر فعال نیست.")
             except Exception:
                 pass
             return
@@ -312,7 +396,7 @@ def tenant_detail_text(tenant, runtime_running: bool) -> str:
         "🤖 **مدیریت ربات نمایندگی**\n\n"
         f"🏷 برند: **{tenant.brand}**\n"
         f"🆔 Bot ID: `{tenant.bot_id}`\n"
-        f"👤 مالک: `{tenant.owner_id}`\n"
+        f"👤 ادمین پنل: `{tenant.owner_id}`\n"
         f"🔗 Username: @{tenant.bot_username or '—'}\n"
         f"📌 وضعیت: **{status}**\n"
         f"⚙️ Runtime: **{runtime}**\n\n"
@@ -325,6 +409,8 @@ def tenant_buttons(tenant_id: str, status: str):
     label = "⛔ غیرفعال کردن ربات" if action == "disable" else "🟢 فعال کردن ربات"
     return [
         [Button.inline(label, PREFIX + f"{action}:{tenant_id}".encode())],
+        [Button.inline("👤 تغییر ادمین پنل", PREFIX + f"owner:{tenant_id}".encode())],
+        [Button.inline("🗑 حذف ربات", PREFIX + f"delete_confirm:{tenant_id}".encode())],
         [Button.inline("🔙 لیست ربات‌ها", PREFIX + b"bots")],
         [Button.inline("🏠 داشبورد", PREFIX + b"home")],
     ]
