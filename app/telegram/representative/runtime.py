@@ -138,12 +138,10 @@ class RepresentativeRuntime:
         async with tenant_dispatch(self.tenant_id):
             if await self._force_join_required(event):
                 return
-            await asyncio.gather(
-                self.client.clear_bot_messages(event.chat_id),
-                event.delete(),
-                return_exceptions=True,
-            )
 
+            # /start must not clear the chat or delete the start message.
+            # Doing that made the Telegram bot screen appear to kick the user out
+            # immediately after pressing Start. The bot now simply opens normally.
             user = await USER_SERVICE.upsert_from_sender(await event.get_sender())
             if user.blocked:
                 return await event.respond(await TEXT_SERVICE.get("blocked_user"))
