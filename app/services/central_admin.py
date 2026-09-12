@@ -81,7 +81,12 @@ class CentralAdminService:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            return await session.get(TenantRecord, tenant_id)
+            record = await session.get(TenantRecord, tenant_id)
+            if record is not None:
+                return record
+            if tenant_id.isdigit():
+                return await session.scalar(select(TenantRecord).where(TenantRecord.bot_id == int(tenant_id)))
+            return None
 
     async def get_tenant_by_bot_id(self, bot_id: int) -> TenantRecord | None:
         if SessionFactory is None:
@@ -89,11 +94,19 @@ class CentralAdminService:
         async with SessionFactory() as session:
             return await session.scalar(select(TenantRecord).where(TenantRecord.bot_id == bot_id))
 
+    async def _get_tenant_in_session(self, session, tenant_id: str) -> TenantRecord | None:
+        record = await session.get(TenantRecord, tenant_id)
+        if record is not None:
+            return record
+        if tenant_id.isdigit():
+            return await session.scalar(select(TenantRecord).where(TenantRecord.bot_id == int(tenant_id)))
+        return None
+
     async def set_tenant_status(self, tenant_id: str, status: TenantStatus) -> TenantRecord:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            record = await session.get(TenantRecord, tenant_id)
+            record = await self._get_tenant_in_session(session, tenant_id)
             if record is None:
                 raise LookupError("tenant not found")
             record.status = status.value
@@ -107,7 +120,7 @@ class CentralAdminService:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            record = await session.get(TenantRecord, tenant_id)
+            record = await self._get_tenant_in_session(session, tenant_id)
             if record is None:
                 raise LookupError("tenant not found")
             record.owner_id = owner_id
@@ -124,7 +137,7 @@ class CentralAdminService:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            record = await session.get(TenantRecord, tenant_id)
+            record = await self._get_tenant_in_session(session, tenant_id)
             if record is None:
                 raise LookupError("tenant not found")
             await session.delete(record)
@@ -135,7 +148,7 @@ class CentralAdminService:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
-            record = await session.get(TenantRecord, tenant_id)
+            record = await self._get_tenant_in_session(session, tenant_id)
             if record is None or not record.bot_token_encrypted:
                 raise LookupError("bot token not found")
             encrypted = record.bot_token_encrypted
