@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from sqlalchemy import select
-from app.db.models import CheckoutRecord, Discount, DiscountRedemption, Order, Plan
+from app.db.models import CheckoutRecord, Discount, DiscountRedemption, Order, Plan, RepresentativeUser, UserBalanceLog
 from app.db.session import SessionFactory
 from app.runtime.context import require_tenant
 from app.services.logs import SERVICE as LOG_SERVICE
@@ -50,6 +50,20 @@ class OrderService:
         await LOG_SERVICE.add("order.checkout",f"order=#{order.id} subtotal={subtotal} discount={discount_amount} total={total} currency=TOMAN code={code or '-'}",telegram_user_id)
         return order
 
+    async def create_wallet_topup(self, telegram_user_id: int, amount: float):
+        amount = _toman(amount)
+        if amount < 5000 or amount > 100_000_000:
+            raise ValueError("مبلغ شارژ باید بین ۵,۰۰۰ تا ۱۰۰,۰۰۰,۰۰۰ تومان باشد.")
+        if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
+        tenant_id=require_tenant()
+        async with SessionFactory() as session:
+            order=Order(tenant_id=tenant_id,telegram_user_id=telegram_user_id,plan_id=0,plan_name="شارژ کیف پول",volume_gb=0,days=0,amount=amount,status="pending")
+            session.add(order); await session.flush()
+            session.add(CheckoutRecord(tenant_id=tenant_id,order_id=order.id,telegram_user_id=telegram_user_id,subtotal=amount,discount_amount=0,total=amount,discount_code=None))
+            await session.commit(); await session.refresh(order)
+        await LOG_SERVICE.add("wallet.topup_created",f"order=#{order.id} amount={amount} currency=TOMAN",telegram_user_id)
+        return order
+
     async def checkout_record(self, order_id):
         if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
         async with SessionFactory() as session:
@@ -73,7 +87,7 @@ class OrderService:
     async def set_status(self, order_id, status):
         if status not in {"pending","paid","fulfilled","cancelled"}: raise ValueError("invalid order status")
         if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
-        tenant_id=require_tenant(); provision_after=False; revoke_after=False
+        tenant_id=require_tenant(); provision_after=False; revoke_after=False; wallet_credit=0.0; wallet_user=0
         async with SessionFactory() as session:
             order=await session.scalar(select(Order).where(Order.id==order_id,Order.tenant_id==tenant_id))
             if order is None: raise LookupError("order not found")
@@ -83,7 +97,7 @@ class OrderService:
             if old==status:return order
             allowed={"pending":{"paid","cancelled"},"paid":{"fulfilled","cancelled"},"fulfilled":set(),"cancelled":set()}
             if status not in allowed.get(old,set()): raise ValueError(f"انتقال وضعیت {old} به {status} مجاز نیست.")
-            if status=="paid" and order.amount>0 and (record is None or not record.payment_reference): raise ValueError("برای تأیید پرداخت، ابتدا شناسه پرداخت کاربر باید ثبت شده باشد.")
+            if status=="paid" and order.amount>0 and (record is None or not record.payment_reference): raise ValueError("برای تأیید پرداخت، ابتدا رسید/شناسه پرداخت کاربر باید ثبت شده باشد.")
             if status=="fulfilled":
                 from app.db.models import ServiceSubscription
                 subscription=await session.scalar(select(ServiceSubscription).where(ServiceSubscription.tenant_id==tenant_id,ServiceSubscription.order_id==order.id))
@@ -97,7 +111,16 @@ class OrderService:
                     discount=await session.scalar(select(Discount).where(Discount.tenant_id==tenant_id,Discount.id==redemption.discount_id).with_for_update())
                     if discount is not None and discount.used_count>0: discount.used_count-=1
                     await session.delete(redemption)
-            order.status=status; await session.commit(); await session.refresh(order); provision_after=status=="paid"
+            order.status=status
+            if status=="paid" and order.plan_id==0:
+                user=await session.scalar(select(RepresentativeUser).where(RepresentativeUser.tenant_id==tenant_id,RepresentativeUser.telegram_user_id==order.telegram_user_id).with_for_update())
+                if user is None: raise LookupError("کاربر کیف پول پیدا نشد.")
+                user.balance=float(user.balance)+float(order.amount)
+                session.add(UserBalanceLog(tenant_id=tenant_id,user_id=user.id,actor_id=order.telegram_user_id,amount=float(order.amount),reason=f"شارژ کیف پول بابت سفارش #{order.id}"))
+                wallet_credit=float(order.amount); wallet_user=order.telegram_user_id
+            await session.commit(); await session.refresh(order); provision_after=status=="paid" and order.plan_id!=0
+        if wallet_credit:
+            await LOG_SERVICE.add("wallet.topup_approved",f"order=#{order_id} user={wallet_user} amount={wallet_credit} currency=TOMAN")
         if revoke_after: await LOG_SERVICE.add("order.cancelled",f"order=#{order_id} reservation released")
         if provision_after:
             try:
