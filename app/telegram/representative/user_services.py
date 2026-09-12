@@ -17,6 +17,11 @@ from app.services.user_services import SERVICE
 from app.services.logs import SERVICE as LOG_SERVICE
 
 PREFIX = b"user:services:"
+ROOT_CALLBACK = b"user:services"
+
+
+def _is_services_callback(data: bytes | None) -> bool:
+    return data == ROOT_CALLBACK or bool(data and data.startswith(PREFIX))
 
 
 def register(client, tenant_id=None):
@@ -25,16 +30,32 @@ def register(client, tenant_id=None):
             if not await allowed(event):
                 return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
             try:
-                await event.answer()
                 await render_callback(event)
-            except Exception as exc:
-                await LOG_SERVICE.add("user.services.error", f"user={event.sender_id} error={type(exc).__name__}: {exc}", event.sender_id)
                 try:
-                    await event.answer("⚠️ خطایی هنگام بارگذاری سرویس‌ها رخ داد. لطفاً دوباره بزنید.", alert=True)
+                    await event.answer()
                 except Exception:
                     pass
+            except Exception as exc:
+                await LOG_SERVICE.add(
+                    "user.services.error",
+                    f"user={event.sender_id} error={type(exc).__name__}: {exc}",
+                    event.sender_id,
+                )
+                try:
+                    await event.edit(
+                        "⚠️ خطایی هنگام بارگذاری سرویس‌ها رخ داد.\n\nلطفاً دوباره روی «سرویس‌های من» بزنید.",
+                        buttons=[[Button.inline("🔄 تلاش مجدد", ROOT_CALLBACK)]],
+                    )
+                except Exception:
+                    try:
+                        await event.answer("⚠️ خطایی هنگام بارگذاری سرویس‌ها رخ داد.", alert=True)
+                    except Exception:
+                        pass
 
-    client.add_event_handler(callback, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
+    client.add_event_handler(
+        callback,
+        events.CallbackQuery(func=lambda e: _is_services_callback(e.data)),
+    )
 
 
 async def allowed(event):
@@ -142,8 +163,6 @@ async def _live_details(subscription_id: int, telegram_user_id: int):
 
     details = await PasarguardClient(panel_url, api_key).get_user_by_id(service.provider_service_id)
 
-    # Persist only provider facts that are safe to mirror locally. The user view
-    # still works from the local record when the panel is temporarily offline.
     async with SessionFactory() as session:
         current = await session.get(ServiceSubscription, service.id)
         if current is not None:
@@ -164,8 +183,6 @@ async def _live_details(subscription_id: int, telegram_user_id: int):
 
 
 async def _user_pending_orders(telegram_user_id: int):
-    # OrderService intentionally exposes tenant-scoped list/get methods only.
-    # Never call a non-existent list_for_user helper from the Telegram layer.
     orders = await ORDERS.list(status="pending", limit=50)
     return [order for order in orders if order.telegram_user_id == telegram_user_id][:10]
 
@@ -235,7 +252,14 @@ async def _send_credentials(event, service, details: PasarguardUserDetails | Non
 
 
 async def render_callback(event):
-    action = event.data[len(PREFIX):].decode(errors="ignore")
+    data = bytes(event.data or b"")
+    if data == ROOT_CALLBACK:
+        action = "list"
+    elif data.startswith(PREFIX):
+        action = data[len(PREFIX):].decode(errors="ignore")
+    else:
+        return await event.answer("گزینه نامعتبر است.", alert=True)
+
     if action in ("", "list"):
         text, buttons = await render_user(event.sender_id)
         return await event.edit(text, buttons=buttons)
@@ -266,7 +290,7 @@ async def render_callback(event):
             buttons.append([Button.inline("📨 ارسال ساب + کانفیگ‌ها", PREFIX + f"send:{sid}".encode())])
         if service.plan_id and status not in {"⏳ در انتظار تحویل", "🔄 در حال ساخت"}:
             buttons.append([Button.inline("🔄 تمدید / خرید مجدد همین پلن", b"user:order:" + str(service.plan_id).encode())])
-        buttons += [[Button.inline("🔄 بروزرسانی لحظه‌ای", PREFIX + f"view:{sid}".encode())], [Button.inline("🔙 سرویس‌های من", PREFIX + b"list")]]
+        buttons += [[Button.inline("🔄 بروزرسانی لحظه‌ای", PREFIX + f"view:{sid}".encode())], [Button.inline("🔙 سرویس‌های من", ROOT_CALLBACK)]]
         return await event.edit(await _detail_text(service, details, live_error), buttons=buttons)
 
     if action.startswith("send:"):
