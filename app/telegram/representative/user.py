@@ -4,6 +4,7 @@ from telethon import Button, events
 from app.runtime.context import get_tenant
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.plans import PlanService
+from app.services.representative_settings import SERVICE as SETTINGS_SERVICE
 from app.services.representative_users import SERVICE as USER_SERVICE
 from app.services.texts import SERVICE as TEXT_SERVICE
 
@@ -61,6 +62,37 @@ async def _buy(event):
     return await event.edit(values["buy_title"] + "\n\n" + values["buy_hint"], buttons=rows)
 
 
+async def _support(event):
+    settings = await SETTINGS_SERVICE.snapshot()
+    raw_support = (settings.get("support_username") or "").strip()
+    if not raw_support:
+        await event.answer("پشتیبانی هنوز توسط نماینده تنظیم نشده است.", alert=True)
+        return await event.edit(
+            "🆘 **پشتیبانی**\n\n"
+            "پشتیبانی این فروشگاه هنوز تنظیم نشده است. لطفاً بعداً دوباره تلاش کنید.",
+            buttons=[[Button.inline("🔙 فروشگاه", USER_PREFIX + b"home")]],
+        )
+
+    support = raw_support.lstrip("@ ").strip()
+    if support.startswith(("https://t.me/", "http://t.me/", "https://telegram.me/", "http://telegram.me/")):
+        url = support
+        label = "💬 ورود به چت پشتیبانی"
+    else:
+        support = support.split("/", 1)[0].strip()
+        url = f"https://t.me/{support}"
+        label = f"💬 ورود به @{support}"
+
+    await event.answer()
+    return await event.edit(
+        "🆘 **پشتیبانی**\n\n"
+        "برای ارتباط با پشتیبانی روی دکمه زیر بزنید 👇",
+        buttons=[
+            [Button.url(label, url)],
+            [Button.inline("🔙 فروشگاه", USER_PREFIX + b"home")],
+        ],
+    )
+
+
 async def callback_handler(event):
     if not await _allowed(event):
         return await event.answer("دسترسی به فروشگاه ندارید.", alert=True)
@@ -110,6 +142,9 @@ async def callback_handler(event):
         from app.telegram.representative.discount_user import render
         return await render(event)
 
+    if action == "support":
+        return await _support(event)
+
     if action.startswith("order:"):
         # The plan button must enter the real checkout flow. The previous
         # implementation created an order directly here and could race with
@@ -119,6 +154,6 @@ async def callback_handler(event):
         from app.telegram.representative.checkout import callback as checkout_callback
         return await checkout_callback(event, get_tenant())
 
-    # referral/trial/support have their own namespaced handlers. They are
+    # referral/trial have their own namespaced handlers. They are
     # intentionally not rejected here so their specialized routers can run.
     return
