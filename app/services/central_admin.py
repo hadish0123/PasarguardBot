@@ -101,6 +101,36 @@ class CentralAdminService:
             await session.refresh(record)
             return record
 
+    async def change_tenant_owner(self, tenant_id: str, owner_id: int) -> TenantRecord:
+        if owner_id <= 0:
+            raise ValueError("invalid owner id")
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            record = await session.get(TenantRecord, tenant_id)
+            if record is None:
+                raise LookupError("tenant not found")
+            record.owner_id = owner_id
+            registration = await session.scalar(
+                select(RepresentativeRegistration).where(RepresentativeRegistration.id == record.registration_id)
+            )
+            if registration is not None:
+                registration.owner_id = owner_id
+            await session.commit()
+            await session.refresh(record)
+            return record
+
+    async def delete_tenant(self, tenant_id: str) -> TenantRecord:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        async with SessionFactory() as session:
+            record = await session.get(TenantRecord, tenant_id)
+            if record is None:
+                raise LookupError("tenant not found")
+            await session.delete(record)
+            await session.commit()
+            return record
+
     async def get_tenant_bot_token(self, tenant_id: str) -> str:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
