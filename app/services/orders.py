@@ -6,6 +6,11 @@ from app.db.session import SessionFactory
 from app.runtime.context import require_tenant
 from app.services.logs import SERVICE as LOG_SERVICE
 
+
+def _toman(value: float) -> float:
+    return float(round(float(value)))
+
+
 class OrderService:
     async def list(self, status=None, limit=30):
         if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
@@ -25,7 +30,7 @@ class OrderService:
         async with SessionFactory() as session:
             plan=await session.scalar(select(Plan).where(Plan.id==plan_id,Plan.tenant_id==tenant_id,Plan.enabled.is_(True)))
             if plan is None: raise LookupError("plan not found or disabled")
-            subtotal=round(float(plan.price),2); discount_amount=0.0; discount=None; code=None
+            subtotal=_toman(plan.price); discount_amount=0.0; discount=None; code=None
             if discount_code:
                 code=discount_code.strip().upper()
                 discount=await session.scalar(select(Discount).where(Discount.tenant_id==tenant_id,Discount.code==code).with_for_update())
@@ -33,8 +38,8 @@ class OrderService:
                 if not discount.enabled: raise ValueError("این کد تخفیف غیرفعال است.")
                 if discount.expires_at and discount.expires_at<=datetime.now(timezone.utc): raise ValueError("اعتبار این کد تخفیف به پایان رسیده است.")
                 if discount.max_uses is not None and discount.used_count>=discount.max_uses: raise ValueError("ظرفیت استفاده از این کد تکمیل شده است.")
-                discount_amount=round(subtotal*float(discount.percent)/100,2)
-            total=max(0.0,round(subtotal-discount_amount,2))
+                discount_amount=_toman(subtotal*float(discount.percent)/100)
+            total=max(0.0,_toman(subtotal-discount_amount))
             order=Order(tenant_id=tenant_id,telegram_user_id=telegram_user_id,plan_id=plan.id,plan_name=plan.name,volume_gb=plan.volume_gb,days=plan.days,amount=total,status="pending")
             session.add(order); await session.flush()
             session.add(CheckoutRecord(tenant_id=tenant_id,order_id=order.id,telegram_user_id=telegram_user_id,subtotal=subtotal,discount_amount=discount_amount,total=total,discount_code=code))
@@ -42,7 +47,7 @@ class OrderService:
                 discount.used_count+=1
                 session.add(DiscountRedemption(tenant_id=tenant_id,discount_id=discount.id,order_id=order.id,telegram_user_id=telegram_user_id,amount=discount_amount))
             await session.commit(); await session.refresh(order)
-        await LOG_SERVICE.add("order.checkout",f"order=#{order.id} subtotal={subtotal} discount={discount_amount} total={total} code={code or '-'}",telegram_user_id)
+        await LOG_SERVICE.add("order.checkout",f"order=#{order.id} subtotal={subtotal} discount={discount_amount} total={total} currency=TOMAN code={code or '-'}",telegram_user_id)
         return order
 
     async def checkout_record(self, order_id):
