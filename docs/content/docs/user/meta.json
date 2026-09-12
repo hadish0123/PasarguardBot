@@ -3,6 +3,7 @@
   "icon": "Users",
   "pages": [
     "index",
+    "representative-design",
     "buy",
     "my-services",
     "balance",
