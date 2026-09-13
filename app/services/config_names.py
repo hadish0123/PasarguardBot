@@ -12,6 +12,11 @@ def set_pending(tenant_id: str, telegram_user_id: int, name: str) -> None:
         _PENDING[(str(tenant_id), int(telegram_user_id))] = name
 
 
+def peek_pending(tenant_id: str, telegram_user_id: int) -> str | None:
+    with _LOCK:
+        return _PENDING.get((str(tenant_id), int(telegram_user_id)))
+
+
 def consume_pending(tenant_id: str, telegram_user_id: int) -> str | None:
     with _LOCK:
         return _PENDING.pop((str(tenant_id), int(telegram_user_id)), None)
