@@ -20,12 +20,7 @@ DASHBOARD = RepresentativeDashboardService()
 
 def _volume_label(volume_gb) -> str:
     value = float(volume_gb or 0)
-    if value < 1:
-        mb = round(value * 1024)
-        return f"{mb} مگ"
-    if value.is_integer():
-        return f"{int(value)} گیگ"
-    return f"{value:g} گیگ"
+    return f"{value:g}GB"
 
 
 def _price_label(price) -> str:
@@ -33,10 +28,10 @@ def _price_label(price) -> str:
 
 
 def _plan_button_label(plan) -> str:
-    # Keep the plan metadata together so Telegram's RTL rendering shows
-    # the volume and duration as one compact phrase beside the plan name.
-    metadata = f"{_volume_label(plan.volume_gb)} {int(plan.days)} روزه"
-    return f"📦 {plan.name} • \u2066{metadata}\u2069"
+    # Keep the complete button label in an LTR-isolated run so Telegram's
+    # RTL renderer preserves the intended order: Plan Name | 10GB | 30DAYS.
+    label = f"📦 {plan.name} | {_volume_label(plan.volume_gb)} | {int(plan.days)}DAYS"
+    return f"\u2066{label}\u2069"
 
 
 async def register_handler(event, tenant_id):
