@@ -28,13 +28,13 @@ def _price_label(price) -> str:
 
 
 def _plan_button_label(plan) -> str:
-    # Use LRM/RLM boundaries instead of relying on Telegram's bidi handling.
-    # The visible order must stay stable even when the plan name is Persian:
-    # 10GB | 30DAYS | Plan Name
+    # Explicit bidi embeddings keep every segment in its own visual position
+    # when Telegram renders a Persian plan name together with LTR metadata.
+    # Visible order: 📦 Plan Name | 10GB | 30DAYS
+    name = str(plan.name or "").strip()
     volume = _volume_label(plan.volume_gb)
     days = f"{int(plan.days)}DAYS"
-    name = str(plan.name or "").strip()
-    return f"\u200e📦 {volume} | {days} | \u200f{name}\u200e"
+    return f"\u202A📦 \u202B{name}\u202C | {volume} | {days}\u202C"
 
 
 async def register_handler(event, tenant_id):
