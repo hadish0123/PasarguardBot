@@ -28,7 +28,10 @@ def _price_label(price) -> str:
 
 
 def _plan_button_label(plan) -> str:
-    return f"📦 {plan.name}  •  {_volume_label(plan.volume_gb)}  •  {int(plan.days)} Days"
+    # Keep the plan metadata in an LTR-isolated run so Telegram's RTL
+    # rendering does not reorder `10 GB • 30 Days` around the Persian name.
+    metadata = f"{_volume_label(plan.volume_gb)} • {int(plan.days)} Days"
+    return f"📦 {plan.name} • \u2066{metadata}\u2069"
 
 
 async def register_handler(event, tenant_id):
