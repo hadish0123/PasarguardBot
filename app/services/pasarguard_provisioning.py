@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.db.models import Order, Plan, ServiceSubscription, TenantRecord
 from app.db.session import SessionFactory
@@ -70,6 +70,14 @@ class PasarguardProvisioningService:
             if plan is None or tenant is None:
                 raise LookupError("پلن یا نمایندگی پیدا نشد.")
 
+            config_name = await session.scalar(
+                text("SELECT config_name FROM representative_orders WHERE id=:order_id LIMIT 1"),
+                {"order_id": order.id},
+            )
+            config_name = str(config_name or "").strip()
+            if not config_name:
+                raise ValueError("نام کانفیگ این سفارش ثبت نشده است؛ سفارش را دوباره ایجاد کنید.")
+
             subscription.status = "provisioning"
             await session.commit()
             await session.refresh(subscription)
@@ -77,10 +85,10 @@ class PasarguardProvisioningService:
             box = get_secret_box()
             api_key = box.decrypt(tenant.panel_api_key_encrypted)
             client = PasarguardClient(tenant.panel_url, api_key)
-            username = f"tg_{order.telegram_user_id}_{order.id}"
+            username = config_name
             note = (
                 f"Representative tenant={tenant_id}; order={order.id}; "
-                f"telegram_user={order.telegram_user_id}; plan={plan.name}"
+                f"telegram_user={order.telegram_user_id}; plan={plan.name}; config={config_name}"
             )
 
             try:
