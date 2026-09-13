@@ -37,9 +37,10 @@ async def initialize_database() -> None:
             await connection.execute(
                 text(
                     "ALTER TABLE representative_orders "
-                    "ADD COLUMN config_name VARCHAR(190) NULL"
+                    "ADD COLUMN IF NOT EXISTS config_name VARCHAR(190) NULL"
                 )
             )
         except Exception:
-            # Existing databases may already have the column.
+            # Keep startup compatible with database engines that do not
+            # support IF NOT EXISTS for ADD COLUMN.
             pass
