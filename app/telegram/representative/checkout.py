@@ -22,6 +22,23 @@ async def allowed(event):
 
 def _money(value: float) -> str: return f"{round(float(value)):,.0f} تومان"
 
+def _volume(value) -> str:
+    return f"{float(value or 0):g} GB"
+
+def _plan_detail(plan, subtotal, discount=0, total=None, code=None) -> str:
+    if total is None: total = subtotal
+    text = (
+        f"🧾 **جزئیات پلن**\n\n"
+        f"📦 **{plan.name}**\n\n"
+        f"💾 **حجم:** {_volume(plan.volume_gb)}\n"
+        f"⏱ **مدت:** {plan.days} روز\n"
+        f"💰 **قیمت:** {_money(subtotal)}"
+    )
+    if code:
+        text += f"\n🎟 **کد تخفیف:** `{code}`\n➖ **تخفیف:** {_money(discount)}"
+    text += f"\n\n💳 **مبلغ نهایی:** {_money(total)}"
+    return text
+
 async def render(event, plan_id):
     sales = await SALES_SERVICE.snapshot()
     if not sales.get("sales_enabled", True): return await event.answer("فروش در حال حاضر غیرفعال است.", alert=True)
@@ -34,9 +51,7 @@ async def render(event, plan_id):
         except (LookupError, ValueError) as exc: s.pop("code", None); return await event.answer(str(exc), alert=True)
     else: total = subtotal
     s["plan_id"] = plan.id
-    text = f"🧾 **تأیید خرید**\n\n📦 **{plan.name}**\n💾 {plan.volume_gb:g} GB · {plan.days} روز\n💰 مبلغ پایه: **{_money(subtotal)}**"
-    if code: text += f"\n🎟 **{code}** · ➖ **{_money(discount)}**"
-    text += f"\n\n💳 مبلغ نهایی: **{_money(total)}**"
+    text = _plan_detail(plan, subtotal, discount, total, code)
     await event.edit(text, buttons=[[Button.inline("💳 ادامه و دریافت شماره کارت", PREFIX+b"pay")],[Button.inline("🎟 کد تخفیف", PREFIX+b"discount"),Button.inline("🗑 حذف تخفیف", PREFIX+b"clear")],[Button.inline("🔙 پلن‌ها",b"user:buy"),Button.inline("❌ لغو",b"user:home")]])
 
 async def _payment_screen(event, order):
@@ -144,7 +159,7 @@ async def incoming(event, tenant_id):
                 order=await ORDER_SERVICE.get(order_id); await _notify_owner(event,order,receipt_label,photo_file_id)
             except (LookupError,ValueError) as exc: return await event.respond(f"❌ {exc}")
             STATE.pop(key(tenant_id,event.sender_id),None)
-            return await event.respond(f"✅ رسید سفارش **#{order_id}** دریافت شد.\n\n🕐 وضعیت: **در انتظار تأیید مدیریت**\nپس از تأیید، سرویس به‌صورت خودکار از پاسارگارد ساخته می‌شود و لینک اشتراک برای شما ارسال خواهد شد.",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
+            return await event.respond(f"✅ رسید سفارش **#{order_id}** دریافت شد.\n\n🕐 وضعیت: **در انتظار تأیید مدیریت**\nپس از تأیید، سرویس به‌صورت خودکار از پاسارگاد ساخته می‌شود و لینک اشتراک برای شما ارسال خواهد شد.",buttons=[[Button.inline("📦 سرویس‌های من",b"user:services")],[Button.inline("🏪 فروشگاه",b"user:home")]])
 
 def register(client,tenant_id):
     async def cb(event): await callback(event,tenant_id)
