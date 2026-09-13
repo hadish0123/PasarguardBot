@@ -27,6 +27,10 @@ def _price_label(price) -> str:
     return f"{round(float(price or 0)):,.0f} تومان"
 
 
+def _plan_button_label(plan) -> str:
+    return f"📦 {plan.name}  •  {_volume_label(plan.volume_gb)}  •  {int(plan.days)} Days"
+
+
 async def register_handler(event, tenant_id):
     async with tenant_dispatch(tenant_id):
         if not event.is_private or not get_tenant():
@@ -56,13 +60,13 @@ async def register_handler(event, tenant_id):
                     buttons=[[Button.inline("🔙 فروشگاه", HOME)]],
                 )
             rows = [
-                [Button.inline(f"📦 {p.name}", ORDER + str(p.id).encode())]
+                [Button.inline(_plan_button_label(p), ORDER + str(p.id).encode())]
                 for p in plans
             ]
             rows.append([Button.inline("🔙 فروشگاه", HOME)])
             values = await TEXT_SERVICE.all()
             return await event.edit(
-                values["buy_title"] + "\n\n" + values["buy_hint"] + "\n\n" + "برای دیدن جزئیات هر پلن، روی نام آن بزنید.",
+                values["buy_title"] + "\n\n" + values["buy_hint"] + "\n\n" + "Plan: Volume • Duration",
                 buttons=rows,
             )
 
