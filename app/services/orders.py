@@ -1,11 +1,11 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 import re
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.db.models import CheckoutRecord, Discount, DiscountRedemption, Order, Plan, RepresentativeUser, UserBalanceLog
 from app.db.session import SessionFactory
 from app.runtime.context import require_tenant
-from app.services.config_names import consume_pending
+from app.services.config_names import clear_pending, peek_pending
 from app.services.logs import SERVICE as LOG_SERVICE
 
 def _toman(value: float) -> float: return float(round(float(value)))
@@ -23,7 +23,7 @@ class OrderService:
  async def checkout(self,telegram_user_id,plan_id,discount_code=None):
   if SessionFactory is None: raise RuntimeError("DATABASE_URL is not configured")
   tenant_id=require_tenant()
-  config_name=consume_pending(tenant_id,telegram_user_id)
+  config_name=peek_pending(tenant_id,telegram_user_id)
   if not config_name or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{2,63}", config_name):
    raise ValueError("ابتدا یک نام معتبر برای کانفیگ انتخاب کنید.")
   async with SessionFactory() as session:
@@ -39,11 +39,12 @@ class OrderService:
     discount_amount=_toman(subtotal*float(discount.percent)/100)
    total=max(0.0,_toman(subtotal-discount_amount)); order=Order(tenant_id=tenant_id,telegram_user_id=telegram_user_id,plan_id=plan.id,plan_name=plan.name,volume_gb=plan.volume_gb,days=plan.days,amount=total,status="pending")
    session.add(order); await session.flush()
-   await session.execute(__import__("sqlalchemy").text("UPDATE representative_orders SET config_name=:config_name WHERE id=:order_id"), {"config_name":config_name,"order_id":order.id})
+   await session.execute(text("UPDATE representative_orders SET config_name=:config_name WHERE id=:order_id"), {"config_name":config_name,"order_id":order.id})
    session.add(CheckoutRecord(tenant_id=tenant_id,order_id=order.id,telegram_user_id=telegram_user_id,subtotal=subtotal,discount_amount=discount_amount,total=total,discount_code=code))
    if discount:
     discount.used_count+=1; session.add(DiscountRedemption(tenant_id=tenant_id,discount_id=discount.id,order_id=order.id,telegram_user_id=telegram_user_id,amount=discount_amount))
    await session.commit(); await session.refresh(order)
+  clear_pending(tenant_id,telegram_user_id)
   await LOG_SERVICE.add("order.checkout",f"order=#{order.id} config={config_name} subtotal={subtotal} discount={discount_amount} total={total} currency=TOMAN code={code or '-'}",telegram_user_id); return order
  async def create_wallet_topup(self,telegram_user_id:int,amount:float):
   amount=_toman(amount)
