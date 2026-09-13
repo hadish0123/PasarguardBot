@@ -18,6 +18,15 @@ PROFILE = b"user:profile:show"
 DASHBOARD = RepresentativeDashboardService()
 
 
+def _volume_label(volume_gb) -> str:
+    value = float(volume_gb or 0)
+    return f"{value:g} GB"
+
+
+def _price_label(price) -> str:
+    return f"{round(float(price or 0)):,.0f} تومان"
+
+
 async def register_handler(event, tenant_id):
     async with tenant_dispatch(tenant_id):
         if not event.is_private or not get_tenant():
@@ -47,13 +56,13 @@ async def register_handler(event, tenant_id):
                     buttons=[[Button.inline("🔙 فروشگاه", HOME)]],
                 )
             rows = [
-                [Button.inline(f"📦 {p.name} | {p.volume_gb:g}GB / {p.days}روز | {p.price:g}", ORDER + str(p.id).encode())]
+                [Button.inline(f"📦 {p.name}", ORDER + str(p.id).encode())]
                 for p in plans
             ]
             rows.append([Button.inline("🔙 فروشگاه", HOME)])
             values = await TEXT_SERVICE.all()
             return await event.edit(
-                values["buy_title"] + "\n\n" + values["buy_hint"],
+                values["buy_title"] + "\n\n" + values["buy_hint"] + "\n\n" + "برای دیدن جزئیات هر پلن، روی نام آن بزنید.",
                 buttons=rows,
             )
 
