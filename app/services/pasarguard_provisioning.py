@@ -98,10 +98,31 @@ class PasarguardProvisioningService:
                     days=order.days,
                     note=note,
                 )
-            except Exception:
-                subscription.status = "pending_provisioning"
-                await session.commit()
-                raise
+            except Exception as exc:
+                error_text = str(exc)
+                if "HTTP 409" not in error_text or "User already exists" not in error_text:
+                    subscription.status = "pending_provisioning"
+                    await session.commit()
+                    raise
+
+                # PasarGuard usernames are globally unique inside a panel. A
+                # representative may already have a client with the same name
+                # (including clients created before this bot was installed).
+                # Never modify/reuse that existing client: create this order
+                # under a deterministic collision-safe username instead.
+                suffix = f"-o{order.id}"
+                fallback_username = f"{config_name[:max(1, 64 - len(suffix))]}{suffix}"
+                try:
+                    provisioned = await client.create_user_for_plan(
+                        username=fallback_username,
+                        volume_gb=order.volume_gb,
+                        days=order.days,
+                        note=note,
+                    )
+                except Exception:
+                    subscription.status = "pending_provisioning"
+                    await session.commit()
+                    raise
 
             now = datetime.now(timezone.utc)
             subscription.provider_service_id = provisioned.service_id
