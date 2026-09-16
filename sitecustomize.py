@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.abc
 import importlib.machinery
-import importlib.util
 import sys
 
 
@@ -78,14 +77,31 @@ if not any(isinstance(x, _UserServicesFinder) for x in sys.meta_path):
 try:
     from telethon import TelegramClient
 
+    # Telegram Bot API treats parse_mode as an optional string parameter.
+    # Passing JSON null is not equivalent to omitting it and can make
+    # editMessageText/sendMessage fail on otherwise plain Persian text.
+    _original_send_message = TelegramClient.send_message
+    _original_edit_message = TelegramClient.edit_message
+
+    async def _safe_send_message(self, entity, message="", *, buttons=None, **kwargs):
+        if kwargs.get("parse_mode") is None:
+            kwargs.pop("parse_mode", None)
+        return await _original_send_message(self, entity, message, buttons=buttons, **kwargs)
+
+    async def _safe_edit_message(self, entity, message_id, text, *, buttons=None, **kwargs):
+        if kwargs.get("parse_mode") is None:
+            kwargs.pop("parse_mode", None)
+        return await _original_edit_message(self, entity, message_id, text, buttons=buttons, **kwargs)
+
+    TelegramClient.send_message = _safe_send_message
+    TelegramClient.edit_message = _safe_edit_message
+
     _original_run_until_disconnected = TelegramClient.run_until_disconnected
 
     async def _run_without_stale_webhook(self):
         try:
             await self._request("deleteWebhook", {"drop_pending_updates": False})
         except Exception:
-            # Do not prevent startup when Telegram is temporarily unavailable;
-            # the normal polling loop retains its existing retry behavior.
             pass
         return await _original_run_until_disconnected(self)
 
