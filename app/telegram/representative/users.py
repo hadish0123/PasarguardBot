@@ -8,7 +8,7 @@ from app.runtime.dispatcher import tenant_dispatch
 from app.services.representative_users import SERVICE
 
 PREFIX = b"rep:users:"
-BACK = b"rep:rep.home"
+BACK = b"rep:home"
 _STATES: dict[tuple[str, int], dict] = {}
 
 
@@ -19,9 +19,11 @@ def _toman(value) -> int:
 
 def register(client, tenant_id: str | None = None) -> None:
     async def callback(event):
-        async with tenant_dispatch(tenant_id): await callback_handler(event)
+        async with tenant_dispatch(tenant_id):
+            await callback_handler(event)
     async def message(event):
-        async with tenant_dispatch(tenant_id): await message_handler(event)
+        async with tenant_dispatch(tenant_id):
+            await message_handler(event)
     client.add_event_handler(callback, events.CallbackQuery(func=lambda e: bool(e.data and e.data.startswith(PREFIX))))
     client.add_event_handler(message, events.NewMessage(incoming=True))
 
