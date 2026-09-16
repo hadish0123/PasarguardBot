@@ -54,6 +54,11 @@ async def render_callback(event):
                 ],
             )
 
+        settings = await SERVICE.snapshot()
+        trial_value = settings.get("trial_volume_value", "1")
+        trial_unit = settings.get("trial_volume_unit", "GB").upper()
+        trial_days = settings.get("trial_days", "1")
+
         rows = [
             [Button.inline("📦 سرویس‌های من", b"user:services")],
             [Button.inline("🏪 فروشگاه", HOME_CALLBACK)],
@@ -65,8 +70,8 @@ async def render_callback(event):
             "🎉 **سرویس آزمایشی فعال شد**\n\n"
             f"📦 پلن: **{plan.name}**\n"
             f"🏷 نام کانفیگ: `{config_name}`\n"
-            f"💾 حجم: **{float(plan.volume_gb):g} GB**\n"
-            f"📅 مدت: **{plan.days} روز**\n\n"
+            f"💾 حجم: **{trial_value:g} {trial_unit}**\n"
+            f"📅 مدت: **{trial_days} روز**\n\n"
             "✅ سرویس مستقیماً در پاسارگارد ساخته و فعال شد.",
             buttons=rows,
         )
