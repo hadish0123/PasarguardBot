@@ -12,7 +12,6 @@ from app.runtime.context import get_tenant, require_tenant
 from app.runtime.dispatcher import tenant_dispatch
 from app.services.pasarguard import PasarguardClient, PasarguardUserDetails
 from app.services.representative_users import SERVICE as USERS
-from app.services.orders import SERVICE as ORDERS
 from app.services.secrets import get_secret_box
 from app.services.user_services import SERVICE
 from app.services.logs import SERVICE as LOG_SERVICE
@@ -37,15 +36,16 @@ def register(client, tenant_id=None):
                 except Exception:
                     pass
             except Exception as exc:
-                await LOG_SERVICE.add(
-                    "user.services.error",
-                    f"user={event.sender_id} error={type(exc).__name__}: {exc}",
-                    event.sender_id,
-                )
+                logger_message = f"user={event.sender_id} tenant={tenant_id} error={type(exc).__name__}: {exc}"
+                try:
+                    await LOG_SERVICE.add("user.services.error", logger_message, event.sender_id)
+                except Exception:
+                    pass
                 try:
                     await event.edit(
                         "⚠️ خطایی هنگام بارگذاری سرویس‌ها رخ داد.\n\nلطفاً دوباره روی «سرویس‌های من» بزنید.",
                         buttons=[[Button.inline("🔄 تلاش مجدد", ROOT_CALLBACK)]],
+                        parse_mode=None,
                     )
                 except Exception:
                     try:
@@ -183,42 +183,22 @@ async def _live_details(subscription_id: int, telegram_user_id: int):
     return service, details
 
 
-async def _user_pending_orders(telegram_user_id: int):
-    orders = await ORDERS.list(status="pending", limit=50)
-    return [order for order in orders if order.telegram_user_id == telegram_user_id][:10]
-
-
-def _service_filename(label: str, service_id: int, content_type: str | None) -> str:
-    if label == "Xray":
-        ext = "txt"
-    elif label == "Clash Meta":
-        ext = "yaml"
-    elif label == "Clash":
-        ext = "yaml"
-    elif label == "Sing-box":
-        ext = "json"
-    elif label == "WireGuard":
-        ext = "conf"
-    elif label == "Outline":
-        ext = "txt"
-    elif label == "لینک‌ها":
-        ext = "txt"
-    elif label == "لینک‌های Base64":
-        ext = "txt"
-    else:
-        ext = "txt"
+def _service_filename(label: str, service_id: int) -> str:
+    extensions = {
+        "Xray": "txt",
+        "Clash Meta": "yaml",
+        "Clash": "yaml",
+        "Sing-box": "json",
+        "WireGuard": "conf",
+        "Outline": "txt",
+        "لینک‌ها": "txt",
+        "لینک‌های Base64": "txt",
+    }
+    ext = extensions.get(label, "txt")
     return f"service-{service_id}-{label.replace(' ', '-').replace('‌', '-')}.{ext}"
 
 
 async def _send_credentials(event, service, details: PasarguardUserDetails | None = None):
-    """Send the subscription URL and the raw Xray response reliably.
-
-    We intentionally use sendMessage for the raw payload instead of the custom
-    document-upload facade. Xray subscription responses are text (vless/vmess/
-    trojan/etc.) and this avoids turning a valid raw config into a broken file
-    upload. Telegram supports regular text messages up to 4096 characters, so
-    large responses are split on line boundaries and remain copyable as-is.
-    """
     subscription_url = (details.subscription_url if details else None) or service.subscription_url
     urls = _config_urls(subscription_url)
     if not urls:
@@ -228,93 +208,63 @@ async def _send_credentials(event, service, details: PasarguardUserDetails | Non
     base = urls[0][1]
     xray_url = urls[1][1]
     await event.respond(
-        f"📦 سرویس #{service.id}\n\n"
-        f"🔗 سابسکریپشن:\n{base}\n\n"
-        f"🦋 لینک Xray:\n{xray_url}\n\n"
-        "⏳ در حال دریافت کانفیگ خام Xray از پاسارگارد...",
+        f"📦 سرویس #{service.id}\n\n🔗 سابسکریپشن:\n{base}\n\n🦋 لینک Xray:\n{xray_url}\n\n⏳ در حال دریافت کانفیگ خام Xray از پاسارگارد...",
         parse_mode=None,
     )
 
-    timeout = httpx.Timeout(20.0, connect=8.0)
+    timeout = httpx.Timeout(15.0, connect=5.0)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
             response = await http.get(xray_url)
             response.raise_for_status()
             body = response.content.decode("utf-8-sig", errors="replace").strip()
     except httpx.HTTPStatusError as exc:
-        await LOG_SERVICE.add(
-            "user.services.config_delivery_error",
-            f"user={event.sender_id} service={service.id} format=Xray http={exc.response.status_code}",
-            event.sender_id,
-        )
-        await event.respond(
-            f"❌ دریافت کانفیگ خام Xray ناموفق بود.\nHTTP {exc.response.status_code}",
-            parse_mode=None,
-        )
+        try:
+            await LOG_SERVICE.add("user.services.config_delivery_error", f"user={event.sender_id} service={service.id} Xray HTTP {exc.response.status_code}", event.sender_id)
+        except Exception:
+            pass
+        await event.respond(f"❌ دریافت کانفیگ خام Xray ناموفق بود.\nHTTP {exc.response.status_code}", parse_mode=None)
         return
-    except httpx.HTTPError as exc:
-        await LOG_SERVICE.add(
-            "user.services.config_delivery_error",
-            f"user={event.sender_id} service={service.id} format=Xray error={type(exc).__name__}: {exc}",
-            event.sender_id,
-        )
-        await event.respond(
-            "❌ ارتباط با لینک Xray برقرار نشد.\nلطفاً چند لحظه بعد دوباره تلاش کنید.",
-            parse_mode=None,
-        )
-        return
-    except Exception as exc:
-        await LOG_SERVICE.add(
-            "user.services.config_delivery_error",
-            f"user={event.sender_id} service={service.id} format=Xray unexpected={type(exc).__name__}: {exc}",
-            event.sender_id,
-        )
-        await event.respond("❌ هنگام آماده‌سازی کانفیگ خام Xray خطایی رخ داد.", parse_mode=None)
+    except httpx.HTTPError:
+        await event.respond("❌ ارتباط با لینک Xray برقرار نشد.\nلطفاً چند لحظه بعد دوباره تلاش کنید.", parse_mode=None)
         return
 
     if not body:
         await event.respond("⚠️ پاسارگارد پاسخ خالی برای کانفیگ Xray برگرداند.", parse_mode=None)
         return
 
-    # Telegram message limit is 4096 characters. Keep a safety margin and
-    # split only at line boundaries whenever possible.
     chunks: list[str] = []
     remaining = body
-    limit = 3800
-    while len(remaining) > limit:
-        cut = remaining.rfind("\n", 0, limit)
+    while len(remaining) > 3800:
+        cut = remaining.rfind("\n", 0, 3800)
         if cut <= 0:
-            cut = limit
+            cut = 3800
         chunks.append(remaining[:cut])
         remaining = remaining[cut:].lstrip("\r\n")
     if remaining:
         chunks.append(remaining)
 
-    await event.respond(
-        f"🦋 کانفیگ خام Xray — سرویس #{service.id}\n"
-        f"📄 {len(chunks)} بخش | دقیقاً مطابق پاسخ پاسارگارد",
-        parse_mode=None,
-    )
+    await event.respond(f"🦋 کانفیگ خام Xray — سرویس #{service.id}\n📄 {len(chunks)} بخش", parse_mode=None)
     for index, chunk in enumerate(chunks, start=1):
-        prefix = f"[{index}/{len(chunks)}]\n" if len(chunks) > 1 else ""
-        await event.respond(prefix + chunk, parse_mode=None)
-
+        await event.respond((f"[{index}/{len(chunks)}]\n" if len(chunks) > 1 else "") + chunk, parse_mode=None)
     await event.respond(
-        "✅ کانفیگ خام Xray با موفقیت ارسال شد.\n"
-        "می‌توانید متن بالا را مستقیماً کپی و داخل کلاینت Xray وارد کنید.",
+        "✅ کانفیگ خام Xray با موفقیت ارسال شد.\nمی‌توانید متن بالا را مستقیماً کپی و داخل کلاینت Xray وارد کنید.",
         parse_mode=None,
         buttons=[[Button.url("🔗 باز کردن سابسکریپشن", base)], [Button.inline("🔙 سرویس من", PREFIX + f"view:{service.id}".encode())]],
     )
 
 
 async def render_user(telegram_user_id: int):
+    # The list screen must never depend on the orders service or on a live
+    # PasarGuard request. It is a local DB screen and should open immediately
+    # even if the panel is temporarily slow/unreachable.
     services = await SERVICE.subscriptions(telegram_user_id, limit=50)
-    pending_orders = await _user_pending_orders(telegram_user_id)
-    if not services and not pending_orders:
+    if not services:
         return (
             "📦 سرویس‌های من\n\nهنوز سرویسی برای شما ساخته نشده است.",
             [[Button.inline("🛍 خرید سرویس", b"user:buy")], [Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())]],
         )
+
     active = [s for s in services if _status(s) == "🟢 فعال"]
     pending = [s for s in services if s.status in {"pending_provisioning", "provisioning"}]
     expired = [s for s in services if _status(s) == "⚫ منقضی‌شده"]
@@ -323,13 +273,10 @@ async def render_user(telegram_user_id: int):
         f"🟢 فعال: {len(active)}\n"
         f"⏳ در حال تحویل: {len(pending)}\n"
         f"⚫ منقضی: {len(expired)}\n"
-        f"🧾 پرداخت‌های نیمه‌تمام: {len(pending_orders)}\n"
-        f"📋 مجموع سرویس‌ها: {len(services)}"
+        f"📋 مجموع سرویس‌ها: {len(services)}\n\n"
+        "سرویس موردنظر را انتخاب کنید:"
     )
-    buttons = [[Button.inline(f"💳 ادامه پرداخت #{o.id} · {o.plan_name}", b"user:order:resume:" + str(o.id).encode())] for o in pending_orders]
-    if services:
-        text += "\n\nسرویس موردنظر را انتخاب کنید:"
-        buttons += [[Button.inline(f"#{s.id} • {s.plan_name} • {_status(s)}", PREFIX + f"view:{s.id}".encode())] for s in services[:20]]
+    buttons = [[Button.inline(f"#{s.id} • {s.plan_name} • {_status(s)}", PREFIX + f"view:{s.id}".encode())] for s in services[:20]]
     buttons += [[Button.inline("🔄 بروزرسانی", PREFIX + b"list")], [Button.inline("🛍 خرید سرویس", b"user:buy")], [Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())]]
     return text, buttons
 
@@ -372,7 +319,7 @@ async def render_callback(event):
 
     if action in ("", "list"):
         text, buttons = await render_user(event.sender_id)
-        return await event.edit(text, buttons=buttons)
+        return await event.edit(text, buttons=buttons, parse_mode=None)
 
     if action.startswith("view:"):
         try:
@@ -401,7 +348,7 @@ async def render_callback(event):
         if service.plan_id and status not in {"⏳ در انتظار تحویل", "🔄 در حال ساخت"}:
             buttons.append([Button.inline("🔄 تمدید / خرید مجدد همین پلن", b"user:order:" + str(service.plan_id).encode())])
         buttons += [[Button.inline("🔄 بروزرسانی لحظه‌ای", PREFIX + f"view:{sid}".encode())], [Button.inline("🔙 سرویس‌های من", ROOT_CALLBACK)]]
-        return await event.edit(await _detail_text(service, details, live_error), buttons=buttons)
+        return await event.edit(await _detail_text(service, details, live_error), buttons=buttons, parse_mode=None)
 
     if action.startswith("send:"):
         try:
@@ -416,7 +363,7 @@ async def render_callback(event):
             service, details = await _live_details(sid, event.sender_id)
         except Exception:
             pass
-        await event.answer("📨 در حال ارسال ساب و کانفیگ خام Xray...")
+        await event.answer("📨 در حال ارسال کانفیگ خام Xray...")
         await _send_credentials(event, service, details)
         return
 
