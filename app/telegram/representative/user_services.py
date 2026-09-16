@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import httpx
 from telethon import Button, events
 
 from app.core.ids import USER_HOME
@@ -187,6 +188,85 @@ async def _user_pending_orders(telegram_user_id: int):
     return [order for order in orders if order.telegram_user_id == telegram_user_id][:10]
 
 
+def _service_filename(label: str, service_id: int, content_type: str | None) -> str:
+    if label == "Xray":
+        ext = "txt"
+    elif label == "Clash Meta":
+        ext = "yaml"
+    elif label == "Clash":
+        ext = "yaml"
+    elif label == "Sing-box":
+        ext = "json"
+    elif label == "WireGuard":
+        ext = "conf"
+    elif label == "Outline":
+        ext = "txt"
+    elif label == "لینک‌ها":
+        ext = "txt"
+    elif label == "لینک‌های Base64":
+        ext = "txt"
+    else:
+        ext = "txt"
+    return f"service-{service_id}-{label.replace(' ', '-').replace('‌', '-')}.{ext}"
+
+
+async def _send_credentials(event, service, details: PasarguardUserDetails | None = None):
+    subscription_url = (details.subscription_url if details else None) or service.subscription_url
+    if not subscription_url:
+        return await event.respond("⚠️ لینک اشتراک هنوز برای این سرویس آماده نشده است.", parse_mode=None)
+
+    base = subscription_url.rstrip("/")
+    routes = [
+        ("Xray", "xray"),
+        ("Clash Meta", "clash_meta"),
+        ("Clash", "clash"),
+        ("Sing-box", "sing_box"),
+        ("WireGuard", "wireguard"),
+        ("Outline", "outline"),
+        ("لینک‌ها", "links"),
+        ("لینک‌های Base64", "links_base64"),
+    ]
+    timeout = httpx.Timeout(20.0, connect=8.0)
+    successful = 0
+    failed: list[str] = []
+
+    await event.respond(
+        f"📥 کانفیگ‌های سرویس #{service.id}\n\n🔗 سابسکریپشن اصلی:\n{base}\n\n⏳ در حال دریافت کانفیگ‌ها از پاسارگارد...",
+        parse_mode=None,
+    )
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
+        for label, route in routes:
+            try:
+                response = await http.get(f"{base}/{route}")
+                if response.status_code != 200 or not response.content.strip():
+                    failed.append(f"{label} (HTTP {response.status_code})")
+                    continue
+                filename = _service_filename(label, service.id, response.headers.get("content-type"))
+                await event.client.send_document(
+                    event.chat_id,
+                    response.content,
+                    filename=filename,
+                    caption=f"📄 {label} | سرویس #{service.id}",
+                )
+                successful += 1
+            except Exception as exc:
+                failed.append(f"{label} ({type(exc).__name__})")
+                await LOG_SERVICE.add(
+                    "user.services.config_delivery_error",
+                    f"user={event.sender_id} service={service.id} format={label} error={type(exc).__name__}: {exc}",
+                    event.sender_id,
+                )
+
+    if failed:
+        await event.respond(
+            f"✅ {successful} فایل کانفیگ ارسال شد.\n\n⚠️ دریافت نشد:\n" + "\n".join(f"• {item}" for item in failed),
+            parse_mode=None,
+        )
+    else:
+        await event.respond(f"✅ هر {successful} فایل کانفیگ سرویس #{service.id} با موفقیت ارسال شد.", parse_mode=None)
+
+
 async def render_user(telegram_user_id: int):
     services = await SERVICE.subscriptions(telegram_user_id, limit=50)
     pending_orders = await _user_pending_orders(telegram_user_id)
@@ -239,16 +319,6 @@ async def _detail_text(service, details: PasarguardUserDetails | None, error: st
     if error:
         text += f"\n\n⚠️ بروزرسانی لحظه‌ای انجام نشد: {error[:180]}"
     return text
-
-
-async def _send_credentials(event, service, details: PasarguardUserDetails | None = None):
-    subscription_url = (details.subscription_url if details else None) or service.subscription_url
-    urls = _config_urls(subscription_url)
-    if not urls:
-        return await event.respond("⚠️ لینک اشتراک هنوز برای این سرویس آماده نشده است.")
-    await event.respond(f"🔗 سابسکریپشن سرویس #{service.id}\n\n{urls[0][1]}")
-    config_text = "📥 کانفیگ‌های سرویس\n\n" + "\n".join(f"{label}:\n{url}" for label, url in urls[1:])
-    await event.respond(config_text)
 
 
 async def render_callback(event):
@@ -306,7 +376,7 @@ async def render_callback(event):
             service, details = await _live_details(sid, event.sender_id)
         except Exception:
             pass
-        await event.answer("📨 در حال ارسال لینک‌ها...")
+        await event.answer("📨 در حال ارسال کانفیگ‌ها...")
         await _send_credentials(event, service, details)
         return
 
