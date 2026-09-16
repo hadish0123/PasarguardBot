@@ -43,4 +43,6 @@ LABEL org.opencontainers.image.title="PasarguardBot" \
       org.opencontainers.image.revision="${REVISION}"
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["uv", "run", "main.py"]
+# Explicitly import sitecustomize before main so the Telegram polling safety
+# patch is guaranteed to run even when the uv launcher changes site loading.
+CMD ["uv", "run", "python", "-c", "import sitecustomize; import runpy; runpy.run_path('main.py', run_name='__main__')"]
