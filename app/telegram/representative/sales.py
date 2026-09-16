@@ -29,19 +29,22 @@ def register(client, tenant_id: str | None = None) -> None:
             value = (event.raw_text or "").strip()
             if value.lower() == "/cancel" or value == "لغو":
                 _INPUTS.pop(key, None)
-                return await event.respond("❌ عملیات لغو شد.")
+                text, buttons = await render()
+                return await event.respond("❌ عملیات لغو شد.", buttons=buttons)
             try:
                 if mode == "support":
-                    username = value.lstrip("@").strip()
-                    if username and (len(username) > 64 or not username.replace("_", "").isalnum()):
-                        raise ValueError("نام کاربری تلگرام معتبر نیست.")
+                    if value.lower() in {"حذف", "پاک کردن", "delete", "clear"}:
+                        username = ""
+                    else:
+                        username = value.lstrip("@").strip()
+                        if username and (len(username) > 64 or not username.replace("_", "").isalnum()):
+                            raise ValueError("نام کاربری تلگرام معتبر نیست.")
                     await SERVICE.set("support_username", username)
                 _INPUTS.pop(key, None)
                 text, buttons = await render()
-                await event.respond("✅ تنظیمات ذخیره شد.", buttons=buttons)
-                await event.respond(text, buttons=buttons)
+                return await event.respond("✅ تنظیمات ذخیره شد.", buttons=buttons)
             except ValueError as exc:
-                await event.respond(f"❌ {exc}\n\nمقدار دیگری ارسال کنید یا `/cancel` بزنید.")
+                return await event.respond(f"❌ {exc}\n\nمقدار دیگری ارسال کنید یا `/cancel` بزنید.")
 
     client.add_event_handler(
         callback,
@@ -97,7 +100,7 @@ async def handle(event):
     elif action == b"support":
         _INPUTS[key] = "support"
         return await event.edit(
-            "🆘 **پشتیبانی**\n\nنام کاربری پشتیبانی را ارسال کنید؛ مثلاً `support_team`.\nبرای حذف، خالی یا `/cancel` بفرستید.",
+            "🆘 **پشتیبانی**\n\nنام کاربری پشتیبانی را ارسال کنید؛ مثلاً `support_team`.\nبرای حذف، عبارت `حذف` را ارسال کنید.\nبرای لغو تغییر، `/cancel` بزنید.",
             buttons=[[Button.inline("❌ لغو", PREFIX + b"cancel")]],
         )
     elif action == b"cancel":
