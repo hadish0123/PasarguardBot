@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -33,14 +32,3 @@ async def initialize_database() -> None:
         raise RuntimeError("SQLALCHEMY_DATABASE_URL is not configured")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-        try:
-            await connection.execute(
-                text(
-                    "ALTER TABLE representative_orders "
-                    "ADD COLUMN IF NOT EXISTS config_name VARCHAR(190) NULL"
-                )
-            )
-        except Exception:
-            # Keep startup compatible with database engines that do not
-            # support IF NOT EXISTS for ADD COLUMN.
-            pass
