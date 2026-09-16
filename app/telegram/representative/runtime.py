@@ -139,9 +139,20 @@ class RepresentativeRuntime:
             if await self._force_join_required(event):
                 return
 
-            # /start must not clear the chat or delete the start message.
-            # Doing that made the Telegram bot screen appear to kick the user out
-            # immediately after pressing Start. The bot now simply opens normally.
+            # On every /start, remove the bot's previously sent messages first,
+            # then remove the current /start command. Telegram does not expose
+            # private-chat history to bots, so only messages the bot can delete
+            # are removed; the application structure and existing menu flow stay
+            # unchanged.
+            try:
+                await self.client.clear_bot_messages(event.chat_id)
+            except Exception:
+                logger.debug("Could not clear previous bot messages on /start", exc_info=True)
+            try:
+                await event.delete()
+            except Exception:
+                logger.debug("Could not delete /start message", exc_info=True)
+
             user = await USER_SERVICE.upsert_from_sender(await event.get_sender())
             if user.blocked:
                 return await event.respond(await TEXT_SERVICE.get("blocked_user"))
