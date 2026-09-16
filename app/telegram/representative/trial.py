@@ -17,8 +17,19 @@ def register(client, tenant_id=None):
         async with tenant_dispatch(tenant_id):
             if not await allowed(event):
                 return await event.answer("دسترسی به این بخش را ندارید.", alert=True)
-            await event.answer()
-            await render_callback(event)
+            try:
+                await render_callback(event)
+            except Exception as exc:
+                try:
+                    await event.edit(
+                        "⚠️ سرویس آزمایشی ساخته شد، اما نمایش نتیجه با خطا مواجه شد.\n\n"
+                        "از «سرویس‌های من» می‌توانید سرویس و کانفیگ را دریافت کنید.",
+                        buttons=[[Button.inline("📦 سرویس‌های من", b"user:services")], [Button.inline("🏪 فروشگاه", HOME_CALLBACK)]],
+                        parse_mode=None,
+                    )
+                except Exception:
+                    pass
+                raise exc
 
     client.add_event_handler(
         callback,
@@ -55,9 +66,14 @@ async def render_callback(event):
             )
 
         settings = await SERVICE.snapshot()
-        trial_value = settings.get("trial_volume_value", "1")
-        trial_unit = settings.get("trial_volume_unit", "GB").upper()
-        trial_days = settings.get("trial_days", "1")
+        raw_value = settings.get("trial_volume_value", "1")
+        try:
+            trial_value = float(raw_value)
+            volume_text = f"{trial_value:g}"
+        except (TypeError, ValueError):
+            volume_text = str(raw_value)
+        trial_unit = str(settings.get("trial_volume_unit", "GB")).upper()
+        trial_days = str(settings.get("trial_days", "1"))
 
         rows = [
             [Button.inline("📦 سرویس‌های من", b"user:services")],
@@ -70,9 +86,11 @@ async def render_callback(event):
             "🎉 **سرویس آزمایشی فعال شد**\n\n"
             f"📦 پلن: **{plan.name}**\n"
             f"🏷 نام کانفیگ: `{config_name}`\n"
-            f"💾 حجم: **{trial_value:g} {trial_unit}**\n"
+            f"💾 حجم: **{volume_text} {trial_unit}**\n"
             f"📅 مدت: **{trial_days} روز**\n\n"
-            "✅ سرویس مستقیماً در پاسارگارد ساخته و فعال شد.",
+            "✅ سرویس در پاسارگارد ساخته و فعال شد.\n"
+            "📦 برای دریافت کانفیگ، روی «سرویس‌های من» بزنید.\n"
+            "🔗 از داخل سرویس می‌توانید لینک اشتراک و کانفیگ Xray را دریافت کنید.",
             buttons=rows,
         )
 
