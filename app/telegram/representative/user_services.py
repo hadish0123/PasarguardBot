@@ -255,9 +255,6 @@ async def _send_credentials(event, service, details: PasarguardUserDetails | Non
 
 
 async def render_user(telegram_user_id: int):
-    # The list screen must never depend on the orders service or on a live
-    # PasarGuard request. It is a local DB screen and should open immediately
-    # even if the panel is temporarily slow/unreachable.
     services = await SERVICE.subscriptions(telegram_user_id, limit=50)
     if not services:
         return (
@@ -274,7 +271,8 @@ async def render_user(telegram_user_id: int):
         f"⏳ در حال تحویل: {len(pending)}\n"
         f"⚫ منقضی: {len(expired)}\n"
         f"📋 مجموع سرویس‌ها: {len(services)}\n\n"
-        "سرویس موردنظر را انتخاب کنید:"
+        "📥 کانفیگ سرویس شما آماده است.\n"
+        "برای دریافت سابسکریپشن و کانفیگ Xray، سرویس موردنظر را انتخاب کنید:\n"
     )
     buttons = [[Button.inline(f"#{s.id} • {s.plan_name} • {_status(s)}", PREFIX + f"view:{s.id}".encode())] for s in services[:20]]
     buttons += [[Button.inline("🔄 بروزرسانی", PREFIX + b"list")], [Button.inline("🛍 خرید سرویس", b"user:buy")], [Button.inline("🔙 فروشگاه", b"user:" + USER_HOME.encode())]]
@@ -319,7 +317,7 @@ async def render_callback(event):
 
     if action in ("", "list"):
         text, buttons = await render_user(event.sender_id)
-        return await event.edit(text, buttons=buttons, parse_mode=None)
+        return await event.edit(text, buttons=buttons)
 
     if action.startswith("view:"):
         try:
@@ -348,7 +346,7 @@ async def render_callback(event):
         if service.plan_id and status not in {"⏳ در انتظار تحویل", "🔄 در حال ساخت"}:
             buttons.append([Button.inline("🔄 تمدید / خرید مجدد همین پلن", b"user:order:" + str(service.plan_id).encode())])
         buttons += [[Button.inline("🔄 بروزرسانی لحظه‌ای", PREFIX + f"view:{sid}".encode())], [Button.inline("🔙 سرویس‌های من", ROOT_CALLBACK)]]
-        return await event.edit(await _detail_text(service, details, live_error), buttons=buttons, parse_mode=None)
+        return await event.edit(await _detail_text(service, details, live_error), buttons=buttons)
 
     if action.startswith("send:"):
         try:
@@ -363,7 +361,7 @@ async def render_callback(event):
             service, details = await _live_details(sid, event.sender_id)
         except Exception:
             pass
-        await event.answer("📨 در حال ارسال کانفیگ خام Xray...")
+        await event.answer("📨 در حال ارسال کانفیگ‌ها...")
         await _send_credentials(event, service, details)
         return
 
