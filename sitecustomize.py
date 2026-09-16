@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import importlib.abc
 import importlib.machinery
+import logging
 import sys
+
+
+logger = logging.getLogger("pasarguardbot.sitecustomize")
 
 
 class _WebAdminFinder(importlib.abc.MetaPathFinder):
@@ -37,6 +41,22 @@ if not any(isinstance(x, _WebAdminFinder) for x in sys.meta_path):
     sys.meta_path.insert(0, _WebAdminFinder())
 
 
+# Patch My Services directly before the application imports its handlers.
+# This is intentionally eager instead of relying only on an import hook: the
+# service module may be imported indirectly by another startup module before
+# the normal finder gets a chance to intercept it.
+try:
+    from app.telegram.representative import user_services as _user_services
+    from app.telegram.representative.config_delivery import deliver as _deliver_configs
+
+    _user_services._send_credentials = _deliver_configs
+    logger.info("real Xray share-link delivery enabled for representative My Services")
+except Exception:
+    logger.exception("failed to enable real Xray share-link delivery patch")
+
+
+# Keep the import hook as a fallback for environments that lazy-load the
+# representative services module after startup.
 class _UserServicesFinder(importlib.abc.MetaPathFinder):
     _done = False
 
@@ -77,9 +97,6 @@ if not any(isinstance(x, _UserServicesFinder) for x in sys.meta_path):
 try:
     from telethon import TelegramClient
 
-    # Telegram Bot API treats parse_mode as an optional string parameter.
-    # Passing JSON null is not equivalent to omitting it and can make
-    # editMessageText/sendMessage fail on otherwise plain Persian text.
     _original_send_message = TelegramClient.send_message
     _original_edit_message = TelegramClient.edit_message
 
@@ -107,4 +124,4 @@ try:
 
     TelegramClient.run_until_disconnected = _run_without_stale_webhook
 except Exception:
-    pass
+    logger.exception("failed to install Telegram runtime safety patches")
