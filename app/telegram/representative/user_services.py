@@ -211,60 +211,100 @@ def _service_filename(label: str, service_id: int, content_type: str | None) -> 
 
 
 async def _send_credentials(event, service, details: PasarguardUserDetails | None = None):
+    """Send the subscription URL and the raw Xray response reliably.
+
+    We intentionally use sendMessage for the raw payload instead of the custom
+    document-upload facade. Xray subscription responses are text (vless/vmess/
+    trojan/etc.) and this avoids turning a valid raw config into a broken file
+    upload. Telegram supports regular text messages up to 4096 characters, so
+    large responses are split on line boundaries and remain copyable as-is.
+    """
     subscription_url = (details.subscription_url if details else None) or service.subscription_url
-    if not subscription_url:
-        return await event.respond("⚠️ لینک اشتراک هنوز برای این سرویس آماده نشده است.", parse_mode=None)
+    urls = _config_urls(subscription_url)
+    if not urls:
+        await event.respond("⚠️ لینک اشتراک این سرویس هنوز آماده نیست.", parse_mode=None)
+        return
 
-    base = subscription_url.rstrip("/")
-    routes = [
-        ("Xray", "xray"),
-        ("Clash Meta", "clash_meta"),
-        ("Clash", "clash"),
-        ("Sing-box", "sing_box"),
-        ("WireGuard", "wireguard"),
-        ("Outline", "outline"),
-        ("لینک‌ها", "links"),
-        ("لینک‌های Base64", "links_base64"),
-    ]
-    timeout = httpx.Timeout(20.0, connect=8.0)
-    successful = 0
-    failed: list[str] = []
-
+    base = urls[0][1]
+    xray_url = urls[1][1]
     await event.respond(
-        f"📥 کانفیگ‌های سرویس #{service.id}\n\n🔗 سابسکریپشن اصلی:\n{base}\n\n⏳ در حال دریافت کانفیگ‌ها از پاسارگارد...",
+        f"📦 سرویس #{service.id}\n\n"
+        f"🔗 سابسکریپشن:\n{base}\n\n"
+        f"🦋 لینک Xray:\n{xray_url}\n\n"
+        "⏳ در حال دریافت کانفیگ خام Xray از پاسارگارد...",
         parse_mode=None,
     )
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
-        for label, route in routes:
-            try:
-                response = await http.get(f"{base}/{route}")
-                if response.status_code != 200 or not response.content.strip():
-                    failed.append(f"{label} (HTTP {response.status_code})")
-                    continue
-                filename = _service_filename(label, service.id, response.headers.get("content-type"))
-                await event.client.send_document(
-                    event.chat_id,
-                    response.content,
-                    filename=filename,
-                    caption=f"📄 {label} | سرویس #{service.id}",
-                )
-                successful += 1
-            except Exception as exc:
-                failed.append(f"{label} ({type(exc).__name__})")
-                await LOG_SERVICE.add(
-                    "user.services.config_delivery_error",
-                    f"user={event.sender_id} service={service.id} format={label} error={type(exc).__name__}: {exc}",
-                    event.sender_id,
-                )
-
-    if failed:
+    timeout = httpx.Timeout(20.0, connect=8.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
+            response = await http.get(xray_url)
+            response.raise_for_status()
+            body = response.content.decode("utf-8-sig", errors="replace").strip()
+    except httpx.HTTPStatusError as exc:
+        await LOG_SERVICE.add(
+            "user.services.config_delivery_error",
+            f"user={event.sender_id} service={service.id} format=Xray http={exc.response.status_code}",
+            event.sender_id,
+        )
         await event.respond(
-            f"✅ {successful} فایل کانفیگ ارسال شد.\n\n⚠️ دریافت نشد:\n" + "\n".join(f"• {item}" for item in failed),
+            f"❌ دریافت کانفیگ خام Xray ناموفق بود.\nHTTP {exc.response.status_code}",
             parse_mode=None,
         )
-    else:
-        await event.respond(f"✅ هر {successful} فایل کانفیگ سرویس #{service.id} با موفقیت ارسال شد.", parse_mode=None)
+        return
+    except httpx.HTTPError as exc:
+        await LOG_SERVICE.add(
+            "user.services.config_delivery_error",
+            f"user={event.sender_id} service={service.id} format=Xray error={type(exc).__name__}: {exc}",
+            event.sender_id,
+        )
+        await event.respond(
+            "❌ ارتباط با لینک Xray برقرار نشد.\nلطفاً چند لحظه بعد دوباره تلاش کنید.",
+            parse_mode=None,
+        )
+        return
+    except Exception as exc:
+        await LOG_SERVICE.add(
+            "user.services.config_delivery_error",
+            f"user={event.sender_id} service={service.id} format=Xray unexpected={type(exc).__name__}: {exc}",
+            event.sender_id,
+        )
+        await event.respond("❌ هنگام آماده‌سازی کانفیگ خام Xray خطایی رخ داد.", parse_mode=None)
+        return
+
+    if not body:
+        await event.respond("⚠️ پاسارگارد پاسخ خالی برای کانفیگ Xray برگرداند.", parse_mode=None)
+        return
+
+    # Telegram message limit is 4096 characters. Keep a safety margin and
+    # split only at line boundaries whenever possible.
+    chunks: list[str] = []
+    remaining = body
+    limit = 3800
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:].lstrip("\r\n")
+    if remaining:
+        chunks.append(remaining)
+
+    await event.respond(
+        f"🦋 کانفیگ خام Xray — سرویس #{service.id}\n"
+        f"📄 {len(chunks)} بخش | دقیقاً مطابق پاسخ پاسارگارد",
+        parse_mode=None,
+    )
+    for index, chunk in enumerate(chunks, start=1):
+        prefix = f"[{index}/{len(chunks)}]\n" if len(chunks) > 1 else ""
+        await event.respond(prefix + chunk, parse_mode=None)
+
+    await event.respond(
+        "✅ کانفیگ خام Xray با موفقیت ارسال شد.\n"
+        "می‌توانید متن بالا را مستقیماً کپی و داخل کلاینت Xray وارد کنید.",
+        parse_mode=None,
+        buttons=[[Button.url("🔗 باز کردن سابسکریپشن", base)], [Button.inline("🔙 سرویس من", PREFIX + f"view:{service.id}".encode())]],
+    )
 
 
 async def render_user(telegram_user_id: int):
@@ -376,7 +416,7 @@ async def render_callback(event):
             service, details = await _live_details(sid, event.sender_id)
         except Exception:
             pass
-        await event.answer("📨 در حال ارسال کانفیگ‌ها...")
+        await event.answer("📨 در حال ارسال ساب و کانفیگ خام Xray...")
         await _send_credentials(event, service, details)
         return
 
