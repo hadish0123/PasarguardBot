@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from app.db.models import RepresentativeUser, UserBalanceLog
 from app.db.session import SessionFactory
@@ -37,7 +37,7 @@ class RepresentativeUserService:
             await session.refresh(user)
             return user
 
-    async def list(self, query: str | None = None, limit: int = 12) -> list[RepresentativeUser]:
+    async def list(self, query: str | None = None, limit: int = 12, offset: int = 0) -> list[RepresentativeUser]:
         if SessionFactory is None:
             raise RuntimeError("DATABASE_URL is not configured")
         tenant_id = self._tenant()
@@ -45,16 +45,48 @@ class RepresentativeUserService:
             stmt = select(RepresentativeUser).where(RepresentativeUser.tenant_id == tenant_id)
             if query:
                 q = query.strip().lstrip("@").lower()
-                try:
-                    numeric_id = int(q)
-                except ValueError:
-                    numeric_id = None
-                terms = [RepresentativeUser.username.ilike(f"%{q}%"), RepresentativeUser.first_name.ilike(f"%{q}%"), RepresentativeUser.last_name.ilike(f"%{q}%")]
-                if numeric_id is not None:
-                    terms.append(RepresentativeUser.telegram_user_id == numeric_id)
-                stmt = stmt.where(or_(*terms))
-            result = await session.execute(stmt.order_by(RepresentativeUser.id.desc()).limit(max(1, min(limit, 50))))
+                tokens = [token for token in q.split() if token]
+                for token in tokens:
+                    terms = [
+                        RepresentativeUser.username.ilike(f"%{token}%"),
+                        RepresentativeUser.first_name.ilike(f"%{token}%"),
+                        RepresentativeUser.last_name.ilike(f"%{token}%"),
+                    ]
+                    try:
+                        numeric_id = int(token)
+                    except ValueError:
+                        numeric_id = None
+                    if numeric_id is not None:
+                        terms.append(RepresentativeUser.telegram_user_id == numeric_id)
+                    stmt = stmt.where(or_(*terms))
+            stmt = stmt.order_by(RepresentativeUser.id.desc()).offset(max(0, offset)).limit(max(1, min(limit, 50)))
+            result = await session.execute(stmt)
             return list(result.scalars().all())
+
+    async def count(self, query: str | None = None) -> int:
+        if SessionFactory is None:
+            raise RuntimeError("DATABASE_URL is not configured")
+        from sqlalchemy import func
+        tenant_id = self._tenant()
+        async with SessionFactory() as session:
+            stmt = select(func.count(RepresentativeUser.id)).where(RepresentativeUser.tenant_id == tenant_id)
+            if query:
+                q = query.strip().lstrip("@").lower()
+                tokens = [token for token in q.split() if token]
+                for token in tokens:
+                    terms = [
+                        RepresentativeUser.username.ilike(f"%{token}%"),
+                        RepresentativeUser.first_name.ilike(f"%{token}%"),
+                        RepresentativeUser.last_name.ilike(f"%{token}%"),
+                    ]
+                    try:
+                        numeric_id = int(token)
+                    except ValueError:
+                        numeric_id = None
+                    if numeric_id is not None:
+                        terms.append(RepresentativeUser.telegram_user_id == numeric_id)
+                    stmt = stmt.where(or_(*terms))
+            return int((await session.scalar(stmt)) or 0)
 
     async def get(self, user_id: int) -> RepresentativeUser | None:
         if SessionFactory is None:
