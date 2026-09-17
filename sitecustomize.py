@@ -5,7 +5,6 @@ import importlib.machinery
 import logging
 import sys
 
-
 logger = logging.getLogger("pasarguardbot.sitecustomize")
 
 
@@ -41,10 +40,6 @@ if not any(isinstance(x, _WebAdminFinder) for x in sys.meta_path):
     sys.meta_path.insert(0, _WebAdminFinder())
 
 
-# Patch My Services directly before the application imports its handlers.
-# This is intentionally eager instead of relying only on an import hook: the
-# service module may be imported indirectly by another startup module before
-# the normal finder gets a chance to intercept it.
 try:
     from app.telegram.representative import user_services as _user_services
     from app.telegram.representative.config_delivery import deliver as _deliver_configs
@@ -55,8 +50,6 @@ except Exception:
     logger.exception("failed to enable real Xray share-link delivery patch")
 
 
-# Keep the import hook as a fallback for environments that lazy-load the
-# representative services module after startup.
 class _UserServicesFinder(importlib.abc.MetaPathFinder):
     _done = False
 
@@ -89,11 +82,30 @@ if not any(isinstance(x, _UserServicesFinder) for x in sys.meta_path):
     sys.meta_path.insert(0, _UserServicesFinder())
 
 
-# The project intentionally uses long-polling for every representative bot.
-# Some bot tokens may still have a Telegram webhook left over from an older
-# installation. Remove it immediately before polling so one stale webhook
-# cannot permanently disable that representative's update loop. Pending
-# updates are preserved.
+# Keep the user's /start message outside the bot-message cleanup set.
+# The normal /start handler only intends to remove messages sent by the bot.
+# This guard makes that invariant explicit before cleanup runs.
+try:
+    from app.telegram.representative import runtime as _representative_runtime
+
+    _original_start = _representative_runtime.RepresentativeRuntime._start
+
+    async def _start_preserving_user_message(self, event):
+        try:
+            incoming_id = getattr(getattr(event, "message", None), "id", None)
+            tracked = getattr(self.client, "_bot_message_ids", None)
+            if incoming_id is not None and tracked is not None and event.chat_id is not None:
+                tracked.setdefault(int(event.chat_id), set()).discard(int(incoming_id))
+        except Exception:
+            logger.debug("Could not protect incoming /start message", exc_info=True)
+        return await _original_start(self, event)
+
+    _representative_runtime.RepresentativeRuntime._start = _start_preserving_user_message
+    logger.info("incoming /start message protection enabled")
+except Exception:
+    logger.exception("failed to install /start message protection")
+
+
 try:
     from telethon import TelegramClient
 
