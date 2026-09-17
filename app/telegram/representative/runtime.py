@@ -32,7 +32,7 @@ class RepresentativeRuntime:
     def register(self):
         self.client.add_event_handler(self._force_join_message, events.NewMessage(incoming=True))
         self.client.add_event_handler(self._force_join_callback, events.CallbackQuery())
-        self.client.add_event_handler(self._start, events.NewMessage(pattern=r"^/start(?:\s+(.+))?$"))
+        self.client.add_event_handler(self._start, events.NewMessage(pattern=r"^/start(?:\\s+(.+))?$"))
         from app.telegram.representative.admin import register as a
         from app.telegram.representative.plans import register as p
         from app.telegram.representative.users import register as u
@@ -139,19 +139,12 @@ class RepresentativeRuntime:
             if await self._force_join_required(event):
                 return
 
-            # On every /start, remove the bot's previously sent messages first,
-            # then remove the current /start command. Telegram does not expose
-            # private-chat history to bots, so only messages the bot can delete
-            # are removed; the application structure and existing menu flow stay
-            # unchanged.
+            # Keep the user's /start message intact. We only clear messages
+            # previously sent by the bot so the new welcome/menu remains clean.
             try:
                 await self.client.clear_bot_messages(event.chat_id)
             except Exception:
                 logger.debug("Could not clear previous bot messages on /start", exc_info=True)
-            try:
-                await event.delete()
-            except Exception:
-                logger.debug("Could not delete /start message", exc_info=True)
 
             user = await USER_SERVICE.upsert_from_sender(await event.get_sender())
             if user.blocked:
