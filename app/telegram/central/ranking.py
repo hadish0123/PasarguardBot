@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from sqlalchemy import func, select
-
 from telethon import events
 
 from app.db.models import RepresentativeUser, TenantRecord, TenantStatus
 from app.db.session import SessionFactory
 
 
-RANKING_PHRASE = "رتبه بندی"
 RANKING_PHRASES = {"رتبه بندی", "رتبه‌بندی", "رتبه بندی!"}
 
 
@@ -35,7 +33,10 @@ async def top_representatives(limit: int = 3):
                 TenantRecord.brand,
                 TenantRecord.bot_id,
             )
-            .order_by(func.count(RepresentativeUser.id).desc(), TenantRecord.bot_id.asc())
+            .order_by(
+                func.count(RepresentativeUser.id).desc(),
+                TenantRecord.bot_id.asc(),
+            )
             .limit(limit)
         )
         rows = (await session.execute(query)).all()
@@ -64,7 +65,10 @@ def _bot_was_added(event) -> bool:
     members = payload.get("new_chat_members") or []
     me = getattr(event.client, "_me", None)
     bot_id = getattr(me, "id", None)
-    return bool(bot_id and any(int(member.get("id", 0)) == int(bot_id) for member in members))
+    return bool(
+        bot_id
+        and any(int(member.get("id", 0)) == int(bot_id) for member in members)
+    )
 
 
 def register_group_handlers(client) -> None:
@@ -75,14 +79,12 @@ def register_group_handlers(client) -> None:
         if _bot_was_added(event):
             try:
                 await event.respond(
-                    "✅ ربات مرکزی با موفقیت فعال شد.
-
-"
+                    "✅ ربات مرکزی با موفقیت فعال شد.\n\n"
                     "برای مشاهده رتبه‌بندی نمایندگان، عبارت «رتبه بندی» را ارسال کنید."
                 )
-                return
             except Exception:
                 pass
+            return
 
         if not _is_ranking(event.raw_text):
             return
@@ -90,11 +92,16 @@ def register_group_handlers(client) -> None:
         try:
             rows = await top_representatives(3)
         except Exception:
-            await event.respond("⚠️ دریافت رتبه‌بندی در حال حاضر ممکن نیست. لطفاً کمی بعد دوباره تلاش کنید.")
+            await event.respond(
+                "⚠️ دریافت رتبه‌بندی در حال حاضر ممکن نیست. "
+                "لطفاً کمی بعد دوباره تلاش کنید."
+            )
             return
 
         if not rows:
-            await event.respond("📊 هنوز اطلاعات کافی برای رتبه‌بندی نمایندگان ثبت نشده است.")
+            await event.respond(
+                "📊 هنوز اطلاعات کافی برای رتبه‌بندی نمایندگان ثبت نشده است."
+            )
             return
 
         lines = [
@@ -106,8 +113,14 @@ def register_group_handlers(client) -> None:
         medals = ("🥇", "🥈", "🥉")
         for index, row in enumerate(rows):
             username = row["username"]
-            display = f"@{username}" if username else (row["brand"] or f"Bot {row['bot_id']}")
-            lines.append(f"{medals[index]} {display} — 👥 {row['user_count']:,} کاربر")
+            display = (
+                f"@{username}"
+                if username
+                else (row["brand"] or f"Bot {row['bot_id']}")
+            )
+            lines.append(
+                f"{medals[index]} {display} — 👥 {row['user_count']:,} کاربر"
+            )
 
         await event.respond("\n".join(lines))
 
