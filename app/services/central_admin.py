@@ -177,7 +177,7 @@ class CentralAdminService:
                 select(
                     ServiceSubscription.tenant_id,
                     func.count(ServiceSubscription.id),
-                    func.sum(func.case((ServiceSubscription.status == "active", 1), else_=0)),
+                    func.sum(case((ServiceSubscription.status == "active", 1), else_=0)),
                 ).group_by(ServiceSubscription.tenant_id)
             )).all()
             service_stats = {
