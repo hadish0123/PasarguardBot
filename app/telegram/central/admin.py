@@ -15,6 +15,8 @@ REGISTRATIONS = RegistrationStore()
 PREFIX = b"central:admin:"
 _AWAITING_BOT_ID: set[int] = set()
 _AWAITING_OWNER_ID: dict[int, str] = {}
+_AWAITING_REP_SEARCH: set[int] = set()
+_REP_SEARCH: dict[int, str] = {}
 PAGE_SIZE = 12
 
 
@@ -35,6 +37,8 @@ async def admin_start(event):
         return
     _AWAITING_BOT_ID.discard(event.sender_id)
     _AWAITING_OWNER_ID.pop(event.sender_id, None)
+    _AWAITING_REP_SEARCH.discard(event.sender_id)
+    _REP_SEARCH.pop(event.sender_id, None)
     await event.respond(await dashboard_text(), buttons=dashboard_buttons())
 
 
@@ -59,6 +63,13 @@ async def admin_text(event):
         except Exception as exc:
             print(f"[central-admin] BOT ID LOOKUP ERROR: {type(exc).__name__}: {exc}", flush=True)
             await event.respond("❌ بررسی شناسه ربات انجام نشد.", buttons=dashboard_buttons())
+        return
+
+    if event.sender_id in _AWAITING_REP_SEARCH:
+        _AWAITING_REP_SEARCH.discard(event.sender_id)
+        query = text[:80]
+        _REP_SEARCH[event.sender_id] = query
+        await event.respond(await representative_dashboard_text(event.sender_id, 0), buttons=await representative_dashboard_buttons(event.sender_id, 0))
         return
 
     if event.sender_id in _AWAITING_OWNER_ID:
@@ -105,6 +116,8 @@ async def admin_callback(event):
         if data in (PREFIX + b"home", PREFIX + b"refresh"):
             _AWAITING_BOT_ID.discard(event.sender_id)
             _AWAITING_OWNER_ID.pop(event.sender_id, None)
+            _AWAITING_REP_SEARCH.discard(event.sender_id)
+            _REP_SEARCH.pop(event.sender_id, None)
             await event.edit(await dashboard_text(), buttons=dashboard_buttons())
             return
         if data == PREFIX + b"guide":
@@ -119,6 +132,35 @@ async def admin_callback(event):
         if data.startswith(PREFIX + b"pending:page:"):
             page = _page_from(data, b"pending:page:")
             await event.edit(await pending_text(page), buttons=await pending_buttons(page))
+            return
+
+        if data == PREFIX + b"representatives":
+            _AWAITING_REP_SEARCH.discard(event.sender_id)
+            _REP_SEARCH.pop(event.sender_id, None)
+            await event.edit(await representative_dashboard_text(event.sender_id, 0), buttons=await representative_dashboard_buttons(event.sender_id, 0))
+            return
+        if data.startswith(PREFIX + b"representatives:page:"):
+            page = _page_from(data, b"representatives:page:")
+            await event.edit(await representative_dashboard_text(event.sender_id, page), buttons=await representative_dashboard_buttons(event.sender_id, page))
+            return
+        if data == PREFIX + b"representatives:search":
+            _AWAITING_REP_SEARCH.add(event.sender_id)
+            _AWAITING_BOT_ID.discard(event.sender_id)
+            _AWAITING_OWNER_ID.pop(event.sender_id, None)
+            await event.edit("🔎 **جستجوی نماینده**\n\nنام برند، @username، Bot ID یا شناسه مالک را ارسال کنید.", buttons=[[Button.inline("🔙 داشبورد نمایندگان", PREFIX + b"representatives")]])
+            return
+        if data == PREFIX + b"representatives:clear":
+            _REP_SEARCH.pop(event.sender_id, None)
+            await event.edit(await representative_dashboard_text(event.sender_id, 0), buttons=await representative_dashboard_buttons(event.sender_id, 0))
+            return
+        if data.startswith(PREFIX + b"representatives:view:"):
+            ref = data[len(PREFIX) + len(b"representatives:view:"):].decode().strip()
+            stats = await SERVICE.representative_dashboard()
+            item = next((x for x in stats if x["tenant"].id == ref or str(x["tenant"].bot_id) == ref), None)
+            if item is None:
+                await event.edit("❌ نماینده پیدا نشد.", buttons=dashboard_buttons())
+                return
+            await event.edit(representative_detail_text(item), buttons=representative_detail_buttons(item["tenant"].bot_id))
             return
         if data == PREFIX + b"bots":
             await event.edit(await bots_text(0), buttons=await bots_buttons(0))
@@ -262,7 +304,7 @@ async def dashboard_text() -> str:
 
 
 def dashboard_buttons():
-    return [[Button.inline("⏳ درخواست‌های در انتظار", PREFIX + b"pending")], [Button.inline("🤖 مدیریت ربات‌های نمایندگان", PREFIX + b"bots")], [Button.inline("🔎 ورود مستقیم با Bot ID", PREFIX + b"lookup")], [Button.inline("🩺 وضعیت و سلامت سیستم", PREFIX + b"system")], [Button.inline("📘 راهنمای کامل پنل", PREFIX + b"guide")], [Button.inline("🔄 بروزرسانی داشبورد", PREFIX + b"refresh")]]
+    return [[Button.inline("⏳ درخواست‌های در انتظار", PREFIX + b"pending")], [Button.inline("📊 داشبورد نمایندگان", PREFIX + b"representatives")], [Button.inline("🤖 مدیریت ربات‌های نمایندگان", PREFIX + b"bots")], [Button.inline("🔎 ورود مستقیم با Bot ID", PREFIX + b"lookup")], [Button.inline("🩺 وضعیت و سلامت سیستم", PREFIX + b"system")], [Button.inline("📘 راهنمای کامل پنل", PREFIX + b"guide")], [Button.inline("🔄 بروزرسانی داشبورد", PREFIX + b"refresh")]]
 
 
 def guide_text() -> str:
@@ -311,6 +353,83 @@ async def pending_buttons(page: int):
     rows.append([Button.inline("🔄 بروزرسانی", PREFIX + f"pending:page:{page}".encode())])
     rows.append([Button.inline("🏠 داشبورد", PREFIX + b"home")])
     return rows
+
+
+
+async def representative_dashboard_text(admin_id: int, page: int) -> str:
+    items = await SERVICE.representative_dashboard(_REP_SEARCH.get(admin_id))
+    total = len(items)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(max(0, page), total_pages - 1)
+    chunk = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    green = sum(1 for x in items if x["rank"] == "green")
+    red = sum(1 for x in items if x["rank"] == "red")
+    black = sum(1 for x in items if x["rank"] == "black")
+    search = _REP_SEARCH.get(admin_id)
+    title = f"📊 **داشبورد نمایندگان** — صفحه {page + 1}/{total_pages}"
+    if search:
+        title += f"\n🔎 جستجو: `{search}`"
+    lines = [title, "", f"🟢 عالی: **{green}**", f"🔴 فعالیت کم: **{red}**", f"⚫ بدون فروش و استفاده: **{black}**", f"👥 نمایندگان نمایش‌داده‌شده: **{total}**", ""]
+    if not chunk:
+        lines.append("نماینده‌ای با این جستجو پیدا نشد.")
+    else:
+        for i, x in enumerate(chunk, page * PAGE_SIZE + 1):
+            t = x["tenant"]
+            lines.append(f"{i}. {x['rank_label']} **{t.brand or 'بدون برند'}**")
+            lines.append(f"   🤖 @{t.bot_username or t.bot_id}  •  💰 {x['revenue']:,} تومان  •  🛒 {x['paid_orders']} خرید  •  👥 {x['users']} کاربر")
+    return "\n".join(lines)
+
+
+async def representative_dashboard_buttons(admin_id: int, page: int):
+    items = await SERVICE.representative_dashboard(_REP_SEARCH.get(admin_id))
+    total_pages = max(1, (len(items) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(max(0, page), total_pages - 1)
+    chunk = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    rows = []
+    for x in chunk:
+        t = x["tenant"]
+        rows.append([Button.inline(f"{x['rank_label'].split(' ', 1)[0]} {t.brand or t.bot_username or t.bot_id}"[:58], PREFIX + f"representatives:view:{t.bot_id}".encode())])
+    nav = []
+    if page > 0:
+        nav.append(Button.inline("⬅️ قبلی", PREFIX + f"representatives:page:{page - 1}".encode()))
+    if page + 1 < total_pages:
+        nav.append(Button.inline("بعدی ➡️", PREFIX + f"representatives:page:{page + 1}".encode()))
+    if nav:
+        rows.append(nav)
+    rows.append([Button.inline("🔎 جستجو", PREFIX + b"representatives:search"), Button.inline("🔄 بروزرسانی", PREFIX + f"representatives:page:{page}".encode())])
+    if _REP_SEARCH.get(admin_id):
+        rows.append([Button.inline("🧹 حذف جستجو", PREFIX + b"representatives:clear")])
+    rows.append([Button.inline("🏠 داشبورد مرکزی", PREFIX + b"home")])
+    return rows
+
+
+def representative_detail_text(item: dict) -> str:
+    t = item["tenant"]
+    return (
+        f"{item['rank_label']} **داشبورد نماینده**\n\n"
+        f"🏷 برند: **{t.brand or '—'}**\n"
+        f"🤖 ربات: @{t.bot_username or '—'}\n"
+        f"🆔 Bot ID: `{t.bot_id}`\n"
+        f"👤 مالک: `{t.owner_id}`\n"
+        f"📌 وضعیت ربات: **{t.status}**\n"
+        f"⚡ Runtime: **{'در حال اجرا' if registry.is_running(t.id) else 'متوقف'}**\n\n"
+        f"🛒 **خریدها:** {item['paid_orders']}\n"
+        f"💰 **درآمد ثبت‌شده:** {item['revenue']:,} تومان\n"
+        f"📦 کل سفارش‌ها: {item['orders']}\n"
+        f"👥 کاربران: {item['users']}\n"
+        f"🟢 سرویس‌های فعال: {item['active_services']}\n"
+        f"📦 کل سرویس‌ها: {item['services']}\n\n"
+        "ℹ️ درآمد بر اساس سفارش‌های پرداخت‌شده/تکمیل‌شده محاسبه شده است."
+    )
+
+
+def representative_detail_buttons(bot_id: int):
+    return [
+        [Button.inline("🔄 بروزرسانی آمار", PREFIX + f"representatives:view:{bot_id}".encode())],
+        [Button.inline("🤖 مدیریت ربات", PREFIX + f"tenant:{bot_id}".encode())],
+        [Button.inline("🔙 داشبورد نمایندگان", PREFIX + b"representatives")],
+        [Button.inline("🏠 داشبورد مرکزی", PREFIX + b"home")],
+    ]
 
 
 async def bots_text(page: int) -> str:
