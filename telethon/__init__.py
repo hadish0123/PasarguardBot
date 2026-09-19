@@ -188,7 +188,24 @@ class TelegramClient:
         async with self._session.post(f"{self._base_url}/{method}", json=payload or {}) as response:
             data = await response.json(content_type=None)
             if not data.get("ok"):
-                raise RuntimeError(f"Telegram Bot API {method} failed: {data.get('description', data)}")
+                description = str(data.get("description", data))
+                if method == "getUpdates" and (
+                    "webhook is active" in description
+                    or "terminated by setWebhook request" in description
+                ):
+                    try:
+                        await self._request("deleteWebhook", {"drop_pending_updates": False})
+                        async with self._session.post(
+                            f"{self._base_url}/getUpdates",
+                            json=payload or {},
+                        ) as retry_response:
+                            retry_data = await retry_response.json(content_type=None)
+                            if retry_data.get("ok"):
+                                return retry_data.get("result")
+                            description = str(retry_data.get("description", retry_data))
+                    except Exception as exc:
+                        description = f"{description}; webhook cleanup failed: {type(exc).__name__}: {exc}"
+                raise RuntimeError(f"Telegram Bot API {method} failed: {description}")
             return data.get("result")
 
     @staticmethod
