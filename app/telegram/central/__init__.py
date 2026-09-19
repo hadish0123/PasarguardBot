@@ -5,6 +5,7 @@ from telethon import Button, events
 from app.db.models import RegistrationStatus
 from app.services.registration_store import RegistrationStore
 from app.telegram.central.registration import register_registration_handlers
+from app.telegram.central.ranking import register_group_handlers
 
 
 STORE = RegistrationStore()
@@ -34,6 +35,7 @@ def register_central_handlers(client) -> None:
     client.add_event_handler(home, events.CallbackQuery(data=HOME))
     client.add_event_handler(cancel, events.CallbackQuery(data=CANCEL))
     register_registration_handlers(client)
+    register_group_handlers(client)
 
 
 def _private(event) -> bool:
