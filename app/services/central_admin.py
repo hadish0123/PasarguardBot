@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.core.exceptions import PermissionDenied
 from app.core.config import settings
@@ -157,8 +157,8 @@ class CentralAdminService:
                 select(
                     Order.tenant_id,
                     func.count(Order.id),
-                    func.sum(func.case((Order.status.in_(("paid", "fulfilled")), 1), else_=0)),
-                    func.coalesce(func.sum(func.case(
+                    func.sum(case((Order.status.in_(("paid", "fulfilled")), 1), else_=0)),
+                    func.coalesce(func.sum(case(
                         (Order.status.in_(("paid", "fulfilled")), Order.amount),
                         else_=0.0,
                     )), 0.0),
