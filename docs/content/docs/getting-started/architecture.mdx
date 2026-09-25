@@ -1,0 +1,57 @@
+# معماری صفر تا صد Central تا Representative
+
+این صفحه مرجع اصلی بازطراحی سیستم است.
+
+## 1. Central
+Central مسئول ثبت و lifecycle ربات‌های نماینده است:
+
+```text
+Central Bot
+   ↓
+Registration
+   ↓
+Approval
+   ↓
+Tenant Provisioning
+   ↓
+Representative Runtime
+```
+
+## 2. Representative Runtime
+هر ربات نماینده یک instance کامل از business runtime است:
+
+```text
+Representative Bot
+├── Admin Runtime
+│   ├── Dashboard
+│   ├── Plans
+│   ├── Users
+│   ├── Sales
+│   ├── Discounts
+│   ├── Settings
+│   └── Logs
+└── User Runtime
+    ├── Home
+    ├── Buy
+    ├── Services
+    ├── Wallet
+    ├── Profile
+    ├── Support
+    └── Referral/Trial
+```
+
+## 3. Tenant Isolation
+هر Representative به Tenant context و Tenant DB خودش route می‌شود. Business query نباید بدون دلیل به Central DB برود.
+
+## 4. Pasarguard
+هر نماینده Panel credential و Panel configuration خودش را دارد. سرویس خریدش باید از همان Panel ساخته شود.
+
+## 5. طراحی
+تمام صفحات در دو سطح تعریف می‌شوند:
+- UI contract
+- Runtime contract
+
+برای هر صفحه، ورودی، دکمه‌ها، state، permission، database access، API calls و error handling قبل از implementation مشخص می‌شود.
+
+## 6. معیار تکمیل
+یک صفحه وقتی تمام است که از Telegram input تا database/service و نتیجه نهایی بدون handler collision کار کند.

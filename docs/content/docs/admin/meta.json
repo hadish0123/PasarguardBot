@@ -3,6 +3,7 @@
   "icon": "Shield",
   "pages": [
     "index",
+    "representative-design",
     "gateway",
     "stats",
     "panels",
