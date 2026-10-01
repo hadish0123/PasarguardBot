@@ -33,18 +33,18 @@ def register(client, tenant_id=None):
             if value.lower() in {"/cancel", "cancel"} or value == "لغو":
                 INPUTS.pop(key, None)
                 text, buttons = await render()
-                return await event.respond("❌ تغییر لغو شد.\n\n" + text, buttons=buttons)
+                return await event.respond("❌ تغییر لغو شد.\n\n" + text, buttons=buttons, parse_mode=None)
 
             try:
                 status = await SERVICE.update_field(field, value, actor_id=event.sender_id)
             except ValueError as exc:
-                return await event.respond(f"❌ {exc}\n\nمقدار درست را ارسال کنید یا /cancel بزنید.")
+                return await event.respond(f"❌ {exc}\n\nمقدار درست را ارسال کنید یا /cancel بزنید.", parse_mode=None)
             except Exception:
-                return await event.respond("❌ ذخیره تنظیمات انجام نشد. دوباره تلاش کنید یا /cancel بزنید.")
+                return await event.respond("❌ ذخیره تنظیمات انجام نشد. دوباره تلاش کنید یا /cancel بزنید.", parse_mode=None)
 
             INPUTS.pop(key, None)
             text, buttons = await saved_result(field, status)
-            await event.respond(text, buttons=buttons)
+            await event.respond(text, buttons=buttons, parse_mode=None)
 
     client.add_event_handler(
         callback,
