@@ -43,11 +43,8 @@ def register(client, tenant_id=None):
                 return await event.respond("❌ ذخیره تنظیمات انجام نشد. دوباره تلاش کنید یا /cancel بزنید.")
 
             INPUTS.pop(key, None)
-            text, buttons = await render(status)
-            await event.respond(
-                "✅ **تغییر ذخیره شد.**\nفقط همان موردی که انتخاب کرده بودید تغییر کرد.\n\n" + text,
-                buttons=buttons,
-            )
+            text, buttons = await saved_result(field, status)
+            await event.respond(text, buttons=buttons)
 
     client.add_event_handler(
         callback,
@@ -92,6 +89,37 @@ async def render(status=None):
         [Button.inline("✏️ تغییر اتصال", PREFIX + b"edit")],
         [Button.inline("🔄 تست اتصال", PREFIX + b"check")],
         [Button.inline("📋 نمایش دوباره", PREFIX + b"list")],
+        [Button.inline("📊 داشبورد", b"rep:" + REP_HOME.encode())],
+    ]
+    return text, buttons
+
+
+async def saved_result(field, status):
+    labels = {
+        "panel_url": "لینک ورود پنل",
+        "panel_username": "یوزرنیم پنل",
+        "panel_api_key": "API Key پنل",
+    }
+    states = {
+        "connected": ("🟢", "اتصال با موفقیت برقرار شد."),
+        "unauthorized": ("🟠", "اتصال برقرار شد اما احراز هویت ناموفق است؛ API Key را بررسی کنید."),
+        "unreachable": ("🔴", "پنل در تست اتصال پاسخ معتبر نداد یا در دسترس نبود."),
+        "missing": ("⚪", "اطلاعات اتصال هنوز کامل نیست."),
+        "unknown": ("⚪", "وضعیت اتصال مشخص نشد."),
+    }
+    icon, result = states.get(status.state, ("⚠️", status.message))
+    label = labels.get(field, "تنظیمات اتصال")
+    text = (
+        f"✅ **{label} با موفقیت ثبت شد.**\n\n"
+        "🔄 **تست اتصال خودکار انجام شد**\n"
+        f"{icon} {result}\n\n"
+        f"🌐 آدرس پنل: {status.panel_url or 'ثبت نشده'}\n"
+        f"👤 یوزرنیم: {status.panel_username or 'ثبت نشده'}\n\n"
+        "🔐 API Key نمایش داده نمی‌شود."
+    )
+    buttons = [
+        [Button.inline("🔙 بازگشت", PREFIX + b"edit")],
+        [Button.inline("🔄 تست دوباره", PREFIX + b"check")],
         [Button.inline("📊 داشبورد", b"rep:" + REP_HOME.encode())],
     ]
     return text, buttons
