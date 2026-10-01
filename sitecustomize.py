@@ -113,13 +113,9 @@ try:
     _original_edit_message = TelegramClient.edit_message
 
     async def _safe_send_message(self, entity, message="", *, buttons=None, **kwargs):
-        if kwargs.get("parse_mode") is None:
-            kwargs.pop("parse_mode", None)
         return await _original_send_message(self, entity, message, buttons=buttons, **kwargs)
 
     async def _safe_edit_message(self, entity, message_id, text, *, buttons=None, **kwargs):
-        if kwargs.get("parse_mode") is None:
-            kwargs.pop("parse_mode", None)
         return await _original_edit_message(self, entity, message_id, text, buttons=buttons, **kwargs)
 
     TelegramClient.send_message = _safe_send_message

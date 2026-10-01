@@ -77,11 +77,11 @@ async def render(status=None):
     url = status.panel_url or "ثبت نشده"
     username = status.panel_username or "ثبت نشده"
     text = (
-        "🔌 **وضعیت اتصال پنل پاسارگارد**\n\n"
-        f"📡 وضعیت اتصال: **{state}**\n"
+        "🔌 وضعیت اتصال پنل پاسارگارد\n\n"
+        f"📡 وضعیت اتصال: {state}\n"
         f"🌐 آدرس پنل: {url}\n"
         f"👤 کاربر پنل: {username}\n"
-        f"🏷 وضعیت نماینده: **{status.tenant_status}**\n\n"
+        f"🏷 وضعیت نماینده: {status.tenant_status}\n\n"
         f"ℹ️ {status.message}\n\n"
         "🔐 API Key به‌صورت امن ذخیره شده و در این صفحه نمایش داده نمی‌شود."
     )
@@ -110,8 +110,8 @@ async def saved_result(field, status):
     icon, result = states.get(status.state, ("⚠️", status.message))
     label = labels.get(field, "تنظیمات اتصال")
     text = (
-        f"✅ **{label} با موفقیت ثبت شد.**\n\n"
-        "🔄 **تست اتصال خودکار انجام شد**\n"
+        f"✅ {label} با موفقیت ثبت شد.\n\n"
+        "🔄 تست اتصال خودکار انجام شد\n"
         f"{icon} {result}\n\n"
         f"🌐 آدرس پنل: {status.panel_url or 'ثبت نشده'}\n"
         f"👤 یوزرنیم: {status.panel_username or 'ثبت نشده'}\n\n"
@@ -130,7 +130,7 @@ async def edit_menu():
     url = status.panel_url or "ثبت نشده"
     username = status.panel_username or "ثبت نشده"
     text = (
-        "✏️ **تغییر اتصال پاسارگارد**\n\n"
+        "✏️ تغییر اتصال پاسارگارد\n\n"
         "هر مورد جداگانه تغییر می‌کند؛ موارد دیگر دست‌نخورده می‌مانند.\n\n"
         f"🌐 آدرس فعلی: {url}\n"
         f"👤 یوزرنیم فعلی: {username}\n"
@@ -152,34 +152,34 @@ async def handle(event):
 
     if action == "check":
         INPUTS.pop(key, None)
-        await event.edit("⏳ در حال بررسی اتصال به پنل پاسارگارد...", buttons=[])
+        await event.edit("⏳ در حال بررسی اتصال به پنل پاسارگارد...", buttons=[], parse_mode=None)
         status = await SERVICE.check()
         text, buttons = await render(status)
-        await event.edit(text, buttons=buttons)
+        await event.edit(text, buttons=buttons, parse_mode=None)
         return await event.answer("اتصال برقرار است." if status.state == "connected" else "نتیجه تست اتصال نمایش داده شد.")
 
     if action == "edit":
         INPUTS.pop(key, None)
         text, buttons = await edit_menu()
-        await event.edit(text, buttons=buttons)
+        await event.edit(text, buttons=buttons, parse_mode=None)
         return await event.answer()
 
     if action.startswith("edit:"):
         field = action[5:]
         prompts = {
             "panel_url": (
-                "🌐 **تغییر لینک ورود پنل**\n\n"
+                "🌐 تغییر لینک ورود پنل\n\n"
                 "آدرس جدید پنل را ارسال کنید.\n"
                 "مثال: https://panel.example.com\n\n"
                 "فقط لینک پنل تغییر می‌کند؛ یوزرنیم و API Key دست‌نخورده می‌مانند."
             ),
             "panel_username": (
-                "👤 **تغییر یوزرنیم پنل**\n\n"
+                "👤 تغییر یوزرنیم پنل\n\n"
                 "یوزرنیم جدید را ارسال کنید.\n\n"
                 "فقط یوزرنیم تغییر می‌کند؛ لینک پنل و API Key دست‌نخورده می‌مانند."
             ),
             "panel_api_key": (
-                "🔐 **تغییر API Key پنل**\n\n"
+                "🔐 تغییر API Key پنل\n\n"
                 "API Key جدید را ارسال کنید.\n\n"
                 "فقط API Key تغییر می‌کند؛ لینک پنل و یوزرنیم دست‌نخورده می‌مانند.\n"
                 "کلید جدید رمزنگاری می‌شود و بعداً نمایش داده نخواهد شد."
@@ -191,12 +191,13 @@ async def handle(event):
         return await event.edit(
             prompts[field] + "\n\nبرای لغو /cancel را ارسال کنید.",
             buttons=[[Button.inline("❌ لغو", PREFIX + b"edit")]],
+            parse_mode=None,
         )
 
     if action in ("list", ""):
         INPUTS.pop(key, None)
         text, buttons = await render()
-        await event.edit(text, buttons=buttons)
+        await event.edit(text, buttons=buttons, parse_mode=None)
         return await event.answer()
 
     return await event.answer("گزینه نامعتبر است.", alert=True)

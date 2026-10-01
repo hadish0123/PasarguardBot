@@ -259,7 +259,11 @@ class TelegramClient:
         keyboard = self._keyboard(buttons)
         if keyboard:
             payload["reply_markup"] = keyboard
-        payload["parse_mode"] = kwargs.get("parse_mode", "Markdown")
+        if "parse_mode" in kwargs:
+            if kwargs["parse_mode"] is not None:
+                payload["parse_mode"] = kwargs["parse_mode"]
+        else:
+            payload["parse_mode"] = "Markdown"
         result = await self._request("sendMessage", payload)
         self._remember_bot_message(int(entity) if entity is not None else None, result)
         return result
@@ -287,7 +291,12 @@ class TelegramClient:
         return result
 
     async def edit_message(self, entity, message_id: int, text: str, *, buttons=None, **kwargs):
-        payload = {"chat_id": entity, "message_id": message_id, "text": text, "parse_mode": kwargs.get("parse_mode", "Markdown")}
+        payload = {"chat_id": entity, "message_id": message_id, "text": text}
+        if "parse_mode" in kwargs:
+            if kwargs["parse_mode"] is not None:
+                payload["parse_mode"] = kwargs["parse_mode"]
+        else:
+            payload["parse_mode"] = "Markdown"
         keyboard = self._keyboard(buttons)
         if keyboard:
             payload["reply_markup"] = keyboard
